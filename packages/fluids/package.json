@@ -1,0 +1,16 @@
+{
+  "name": "@destruction-dynamics/fluids",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@destruction-dynamics/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@destruction-dynamics/physics": "0.1.0"
+  }
+}

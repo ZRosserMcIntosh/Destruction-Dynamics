@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Destruction Dynamics — Playground</title>
+    <meta
+      name="description"
+      content="Browser-native cinematic destruction and fluid interaction: The Deep End."
+    />
+  </head>
+  <body>
+    <div id="viewport"></div>
+    <aside id="panel" aria-label="Simulation controls">
+      <header>
+        <h1>Destruction Dynamics</h1>
+        <p class="sub">Playground · M1–M3 prototype</p>
+      </header>
+
+      <label
+        >Scenario
+        <select id="scenario">
+          <option value="the-deep-end" selected>The Deep End (tower → ocean)</option>
+          <option value="bridge" disabled>São Paulo bridge (planned)</option>
+          <option value="salvage" disabled>Underwater salvage (planned)</option>
+        </select>
+      </label>
+
+      <div class="row buttons">
+        <button id="btn-play" class="primary" title="Arm the event: cancellable preparation, then collapse">
+          Play
+        </button>
+        <button id="btn-trigger" title="Commit immediately, skipping preparation">Trigger now</button>
+        <button id="btn-cancel" title="Cancel during preparation">Cancel</button>
+      </div>
+      <div class="row buttons">
+        <button id="btn-pause">Pause</button>
+        <button id="btn-reset">Reset</button>
+        <button id="btn-restore" title="Begin restoration now instead of waiting 24 h">Restore now</button>
+      </div>
+
+      <label
+        >Timeline <span id="timeline-label" class="mono">—</span>
+        <input id="timeline" type="range" min="-5" max="70" step="0.05" value="-5" />
+      </label>
+      <div id="stage-markers" class="markers" aria-hidden="true"></div>
+
+      <div class="grid2">
+        <label
+          >Speed
+          <select id="speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="8">8×</option>
+          </select>
+        </label>
+        <label
+          >Quality
+          <select id="quality">
+            <option value="dorito">Potato (Dorito)</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="high">High</option>
+            <option value="cinematic">Cinematic</option>
+          </select>
+        </label>
+        <label
+          >Camera
+          <select id="camera">
+            <option value="cinematic" selected>Cinematic director</option>
+            <option value="free">Free</option>
+            <option value="street">Street level</option>
+            <option value="offshore">Offshore</option>
+            <option value="underwater">Underwater</option>
+            <option value="follow">Follow debris</option>
+          </select>
+        </label>
+        <label
+          >Seed
+          <input id="seed" type="number" value="1234" />
+        </label>
+      </div>
+
+      <fieldset>
+        <legend>Overlays</legend>
+        <label class="check"><input id="toggle-physics" type="checkbox" /> Physics bodies</label>
+        <label class="check"><input id="toggle-water" type="checkbox" /> Water near-field</label>
+        <label class="check"><input id="toggle-collision" type="checkbox" /> Tower collision</label>
+        <label class="check"><input id="toggle-audio" type="checkbox" checked /> Audio (procedural)</label>
+      </fieldset>
+
+      <div class="row buttons">
+        <button id="btn-save">Save state</button>
+        <button id="btn-load">Load state</button>
+      </div>
+
+      <pre id="stats" class="mono" aria-live="off"></pre>
+      <p class="hint">
+        Free camera: drag to orbit, scroll to zoom. Underwater: drag to look, WASD to swim, E/Q up/down, Shift
+        fast.
+      </p>
+    </aside>
+    <div id="banner" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
