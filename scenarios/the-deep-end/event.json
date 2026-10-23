@@ -1,0 +1,253 @@
+{
+  "schema": "dd-event/1",
+  "id": "the-deep-end",
+  "version": 1,
+  "title": "The Deep End",
+  "environment": "coastal-city",
+  "eventType": "landmark-collapse",
+  "bounds": { "minEast": -80, "maxEast": 640, "minNorth": -320, "maxNorth": 320 },
+  "preparation": {
+    "duration": 5,
+    "cues": [
+      {
+        "id": "prep-camera",
+        "at": 0,
+        "channel": "camera",
+        "type": "shot",
+        "params": { "shot": "street-establishing" }
+      },
+      {
+        "id": "prep-groan",
+        "at": 0.5,
+        "channel": "audio",
+        "type": "groan",
+        "params": { "gain": 0.5, "duration": 4 }
+      },
+      {
+        "id": "prep-dust",
+        "at": 2,
+        "channel": "particles",
+        "type": "dust",
+        "params": { "count": 120, "floor": 8, "spread": 18 }
+      }
+    ]
+  },
+  "stages": [
+    {
+      "id": "initial-failure",
+      "state": "INITIAL_FAILURE",
+      "duration": 7,
+      "cues": [
+        {
+          "id": "if-groan",
+          "at": 0,
+          "channel": "audio",
+          "type": "groan",
+          "params": { "gain": 1, "duration": 6 }
+        },
+        {
+          "id": "if-shake",
+          "at": 0,
+          "channel": "camera",
+          "type": "shake",
+          "params": { "intensity": 0.25, "duration": 7 }
+        },
+        {
+          "id": "if-camera",
+          "at": 0,
+          "channel": "camera",
+          "type": "shot",
+          "params": { "shot": "street-low" }
+        },
+        {
+          "id": "if-dust",
+          "at": 0.4,
+          "channel": "particles",
+          "type": "dust",
+          "params": { "count": 400, "floor": 8, "spread": 22 }
+        },
+        { "id": "if-glass-1", "at": 1.5, "channel": "audio", "type": "glass", "params": { "gain": 0.8 } },
+        {
+          "id": "if-sparks",
+          "at": 2.5,
+          "channel": "particles",
+          "type": "sparks",
+          "params": { "count": 160, "floor": 8 }
+        },
+        {
+          "id": "if-metal",
+          "at": 3.5,
+          "channel": "audio",
+          "type": "metal",
+          "params": { "gain": 1, "duration": 3 }
+        },
+        {
+          "id": "if-collision",
+          "at": 4,
+          "channel": "collision",
+          "type": "mode",
+          "params": { "mode": "kinematic" }
+        },
+        { "id": "if-glass-2", "at": 5, "channel": "audio", "type": "glass", "params": { "gain": 1 } }
+      ]
+    },
+    {
+      "id": "progressive-collapse",
+      "state": "ACTIVE_DESTRUCTION",
+      "duration": 11,
+      "cues": [
+        {
+          "id": "pc-rumble",
+          "at": 0,
+          "channel": "audio",
+          "type": "rumble",
+          "params": { "gain": 1, "duration": 12 }
+        },
+        {
+          "id": "pc-camera",
+          "at": 0,
+          "channel": "camera",
+          "type": "shot",
+          "params": { "shot": "offshore-wide" }
+        },
+        {
+          "id": "pc-shake",
+          "at": 0,
+          "channel": "camera",
+          "type": "shake",
+          "params": { "intensity": 0.5, "duration": 11 }
+        },
+        {
+          "id": "pc-dust",
+          "at": 0.5,
+          "channel": "particles",
+          "type": "dust",
+          "params": { "count": 1200, "floor": 8, "spread": 30 }
+        },
+        {
+          "id": "pc-metal",
+          "at": 1,
+          "channel": "audio",
+          "type": "metal",
+          "params": { "gain": 1, "duration": 5 }
+        },
+        {
+          "id": "pc-sparks",
+          "at": 2,
+          "channel": "particles",
+          "type": "sparks",
+          "params": { "count": 400, "floor": 8 }
+        },
+        { "id": "pc-glass", "at": 3, "channel": "audio", "type": "glass", "params": { "gain": 1 } },
+        {
+          "id": "pc-camera-2",
+          "at": 5.5,
+          "channel": "camera",
+          "type": "shot",
+          "params": { "shot": "beach-tracking" }
+        },
+        { "id": "pc-glass-2", "at": 7, "channel": "audio", "type": "glass", "params": { "gain": 1 } }
+      ]
+    },
+    {
+      "id": "water-impact",
+      "state": "WATER_IMPACT",
+      "duration": 6,
+      "cues": [
+        {
+          "id": "wi-impact",
+          "at": 0,
+          "channel": "fluid",
+          "type": "impact",
+          "params": {
+            "intensity": 1,
+            "duration": 1.6,
+            "visualProfile": "landmark-collapse",
+            "footprint": { "kind": "box", "fromTower": true }
+          }
+        },
+        { "id": "wi-audio", "at": 0, "channel": "audio", "type": "water-impact", "params": { "gain": 1.2 } },
+        {
+          "id": "wi-camera",
+          "at": 0,
+          "channel": "camera",
+          "type": "shot",
+          "params": { "shot": "impact-wide" }
+        },
+        {
+          "id": "wi-shake",
+          "at": 0,
+          "channel": "camera",
+          "type": "shake",
+          "params": { "intensity": 1, "duration": 3 }
+        },
+        {
+          "id": "wi-spray",
+          "at": 0,
+          "channel": "particles",
+          "type": "spray-sheet",
+          "params": { "count": 6000 }
+        },
+        { "id": "wi-mist", "at": 0.6, "channel": "particles", "type": "mist", "params": { "count": 900 } },
+        {
+          "id": "wi-collision",
+          "at": 2,
+          "channel": "collision",
+          "type": "mode",
+          "params": { "mode": "wreck" }
+        },
+        { "id": "wi-echo", "at": 2.5, "channel": "audio", "type": "echo", "params": { "gain": 0.6 } }
+      ]
+    },
+    {
+      "id": "settling",
+      "state": "SETTLING",
+      "duration": 24,
+      "cues": [
+        {
+          "id": "st-camera",
+          "at": 0,
+          "channel": "camera",
+          "type": "shot",
+          "params": { "shot": "offshore-aftermath" }
+        },
+        {
+          "id": "st-bubbles",
+          "at": 1,
+          "channel": "particles",
+          "type": "bubbles",
+          "params": { "count": 1500 }
+        },
+        {
+          "id": "st-bubbles-audio",
+          "at": 1,
+          "channel": "audio",
+          "type": "bubbles",
+          "params": { "gain": 0.7, "duration": 20 }
+        },
+        {
+          "id": "st-surge",
+          "at": 3,
+          "channel": "fluid",
+          "type": "impact",
+          "params": {
+            "intensity": 0.25,
+            "duration": 2,
+            "visualProfile": "secondary-surge",
+            "footprint": { "kind": "box", "fromTower": true }
+          }
+        },
+        { "id": "st-world", "at": 20, "channel": "world", "type": "override", "params": { "state": "wreck" } }
+      ]
+    },
+    {
+      "id": "aftermath",
+      "state": "AFTERMATH",
+      "duration": null,
+      "cues": [
+        { "id": "am-camera", "at": 0, "channel": "camera", "type": "shot", "params": { "shot": "release" } }
+      ]
+    }
+  ],
+  "restoration": { "mode": "real-world-duration", "hours": 24, "transitionSeconds": 4 }
+}

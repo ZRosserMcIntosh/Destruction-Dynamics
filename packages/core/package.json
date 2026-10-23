@@ -1,0 +1,10 @@
+{
+  "name": "@destruction-dynamics/core",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
