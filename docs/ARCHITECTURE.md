@@ -85,6 +85,15 @@ seeking, loading and late joining correct. Cues are for flourishes.
 | Meso | facade panels, concrete chunks | `FacadePlan`: a seeded detach time per panel, earlier near the break and on the compression face, most of the rest at impact. Detached panels become Rapier bodies through `DebrisManager`, within the body budget. When the budget refuses a spawn, the panel turns into particles. |
 | Micro | glass, sparks, dust, spray | `ParticleSim`: structure-of-arrays storage with fixed capacity, a cap set by the governor, and per-kind water behaviour |
 
+**Floor layers.** The number of tipping layers comes from the quality preset:
+5 at Potato, 12 at Balanced, 26 at High and 77 (one per floor) at Cinematic.
+The fall is authored for every preset. At impact, the layered presets release
+each layer into `LayerSolver`, an XPBD rigid-body solver with breakable slab
+joints, flooding buoyancy, seabed friction and layer-to-layer contact. It
+runs ahead of time, in a Web Worker in the browser, and stores keyframes, so
+poses stay a function of event time. See
+[ADR 0009](DECISIONS/0009-floor-layers.md).
+
 `TowerCollision` switches gameplay collision from static boxes (intact) to
 kinematic boxes that follow the authored motion, which sweeps debris and any
 player out of the way, and then to static boxes at the wreck. The mode comes

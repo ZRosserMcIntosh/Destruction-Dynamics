@@ -233,6 +233,13 @@ async function start(): Promise<void> {
         `particles ${s.particles}/${s.particleLimit}`,
         `fluid ${s.fluid.grid}² · substeps ${s.fluid.substeps} · wave ${s.fluid.maxDisturbance.toFixed(1)} m (peak ${s.fluid.peak.toFixed(1)})`,
         `collision ${s.collisionMode} · nav v${s.navigationVersion} · tiles ${s.activeTiles.length}`,
+        `structure ${s.layers.count} layers · ${
+          s.layers.status === 'authored'
+            ? 'authored wreck'
+            : s.layers.status === 'computing'
+              ? 'solving in worker…'
+              : `simulated (${(s.layers.computeMs ?? 0).toFixed(0)} ms, ${s.layers.jointsBroken ?? 0}/${s.layers.joints ?? 0} joints broke)`
+        }`,
         `draws ${i.calls} · tris ${(i.triangles / 1000).toFixed(0)}k · px ${i.pixelRatio.toFixed(2)}`,
         `camera ${rig.mode}${rig.mode === 'cinematic' ? ` (${rig.shotName})` : ''}${i.underwater ? ' · underwater' : ''}`,
         mem
