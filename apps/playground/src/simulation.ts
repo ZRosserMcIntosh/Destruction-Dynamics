@@ -32,6 +32,7 @@ import {
   DEEP_END_TOWER,
   DebrisManager,
   type FacadePlan,
+  type LayerSimulationResult,
   type PanelLocal,
   TowerCollapse,
   TowerCollision,
@@ -116,6 +117,11 @@ export class DeepEndSimulation {
   /** Bumped on every collision-representation change (stand-in for navmesh rebuilds). */
   navigationVersion = 0;
   readonly cueLog: string[] = [];
+  /** Floor-layer solver state: authored (off), computing (in a worker) or ready. */
+  layerStatus: 'authored' | 'computing' | 'ready' = 'authored';
+  private pendingLayers: LayerSimulationResult | null = null;
+  private layerWorker: Worker | null = null;
+  private layerJob = 0;
   peakWave = 0;
   private prevPoses: Pose[] = [];
   private lease: TileLease | null = null;
@@ -201,19 +207,59 @@ export class DeepEndSimulation {
   }
 
   private buildTower(): void {
-    this.tower = new TowerCollapse(DEEP_END_TOWER, this.timeline, {
-      groundHeight: deepEndGroundHeight,
-      seed: this.director.seed,
-    });
+    const layered = this.quality.layerSimulation;
+    const useWorker = layered && typeof Worker !== 'undefined';
+    this.tower = new TowerCollapse(
+      { ...DEEP_END_TOWER, sections: this.quality.structuralLayers },
+      this.timeline,
+      {
+        groundHeight: deepEndGroundHeight,
+        seed: this.director.seed,
+        seaLevel: SEA_LEVEL,
+        simulateLayers: layered ? (useWorker ? 'deferred' : true) : false,
+      },
+    );
+    this.pendingLayers = null;
+    this.layerStatus = !layered ? 'authored' : useWorker ? 'computing' : 'ready';
+    if (useWorker) this.requestLayers();
     this.plan = buildFacadePlan(
-      DEEP_END_TOWER,
+      this.tower.spec,
       this.tower.sections,
       this.timeline,
       this.quality.facadeColumns,
       this.director.seed,
     );
-    this.panelLocal = facadePanelGeometry(DEEP_END_TOWER, this.tower.sections, this.plan);
+    this.panelLocal = facadePanelGeometry(this.tower.spec, this.tower.sections, this.plan);
     this.layoutVersion++;
+  }
+
+  /** Computes the floor layers in a Web Worker so the main thread never stalls. */
+  private requestLayers(): void {
+    this.layerWorker ??= new Worker(new URL('./layerWorker.ts', import.meta.url), { type: 'module' });
+    const id = ++this.layerJob;
+    const tower = this.tower;
+    this.layerWorker.onmessage = (e: MessageEvent<{ id: number; result: LayerSimulationResult }>) => {
+      if (e.data.id !== this.layerJob || tower !== this.tower) return;
+      this.pendingLayers = e.data.result;
+      this.layerStatus = 'ready';
+      this.tryAttachLayers();
+    };
+    this.layerWorker.onerror = (err) => {
+      console.warn('layer worker failed; keeping the authored wreck', err.message);
+      this.layerStatus = 'authored';
+    };
+    this.layerWorker.postMessage({ id, ...tower.layerSolverInput() });
+  }
+
+  /** Attaches a finished layer result unless the tower is already past impact (avoids a visible jump). */
+  private tryAttachLayers(): void {
+    const r = this.pendingLayers;
+    if (!r) return;
+    const d = this.director;
+    const safe = !d.committed || d.time < this.timeline.impact - 0.25 || d.state === 'RESTORATION';
+    if (!safe) return;
+    this.tower.attachLayers(r);
+    this.pendingLayers = null;
   }
 
   private spawnFloaters(): void {
@@ -253,7 +299,12 @@ export class DeepEndSimulation {
     if (prev.maxParticles !== this.quality.maxParticles)
       this.particles = new ParticleSim(this.quality.maxParticles);
     this.debris.setLimit(this.quality.maxDebrisBodies);
-    if (prev.facadeColumns !== this.quality.facadeColumns) this.rebuildTower();
+    if (
+      prev.facadeColumns !== this.quality.facadeColumns ||
+      prev.structuralLayers !== this.quality.structuralLayers ||
+      prev.layerSimulation !== this.quality.layerSimulation
+    )
+      this.rebuildTower();
     if (prev.floatingObjects !== this.quality.floatingObjects) this.spawnFloaters();
   }
 
@@ -302,6 +353,7 @@ export class DeepEndSimulation {
       this.lease ??= this.tiles.acquire(tilesForBounds(this.def.bounds), this.def.id);
     }
     if (to === 'INTACT') {
+      this.tryAttachLayers();
       this.lease?.release();
       this.lease = null;
       this.world.clear(this.def.id);
@@ -420,7 +472,13 @@ export class DeepEndSimulation {
     if (wasCommitted && d.committed && d.time > prevTime && simDt > 0)
       this.detachPanels(prevTime, d.time, simDt);
 
-    const mode = towerCollisionModeAt(d.state, d.time, this.timeline);
+    if (this.pendingLayers) this.tryAttachLayers();
+    const mode = towerCollisionModeAt(
+      d.state,
+      d.time,
+      this.timeline,
+      this.tower.layersAttached ? Math.min(this.tower.settledAt, this.timeline.settleEnd) : undefined,
+    );
     if (mode !== this.collision.mode) this.navigationVersion++;
     this.collision.update(mode, this.poses);
 
@@ -612,6 +670,12 @@ export class DeepEndSimulation {
       worldOverrides: tilesForBounds(this.def.bounds).flatMap((t) => this.world.forTile(t)).length,
       costs: this.profiler.costs(),
       physicsBackend: this.physics.name,
+      layers: {
+        count: this.tower.sections.length - 1,
+        status: this.layerStatus,
+        attached: this.tower.layersAttached,
+        ...this.tower.layerStats,
+      },
     };
   }
 }

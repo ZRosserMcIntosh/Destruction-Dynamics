@@ -10,3 +10,4 @@
 | [0006](0006-server-authoritative-events.md) | Server-authoritative event state; clients reconstruct the visuals | Accepted |
 | [0007](0007-hybrid-ocean.md) | Gerstner far field, shallow-water near field, authored surges | Accepted |
 | [0008](0008-procedural-placeholder-audio.md) | Procedural placeholder audio behind `AudioEngine` | Accepted |
+| [0009](0009-floor-layers.md) | Floor layers chosen by fidelity, released into a precomputed solver at impact | Accepted |
