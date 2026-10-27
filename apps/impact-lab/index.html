@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Impact Lab — Destruction Dynamics</title>
+    <meta
+      name="description"
+      content="Crash a test car into brick, block, glass, hay or indestructible cheese, or fire everyday objects at breakable panels. Real-time fracture in the browser."
+    />
+  </head>
+  <body>
+    <div id="viewport"></div>
+    <aside id="panel" aria-label="Impact Lab controls">
+      <header>
+        <h1>Impact Lab</h1>
+        <p class="sub">Destruction Dynamics · fracture prototype</p>
+      </header>
+
+      <div class="tabs" role="tablist">
+        <button id="tab-crash" role="tab" aria-selected="true" class="tab active">Car vs. wall</button>
+        <button id="tab-gallery" role="tab" aria-selected="false" class="tab">Projectile gallery</button>
+      </div>
+
+      <section id="crash-controls">
+        <label
+          >Wall
+          <select id="wall">
+            <option value="brick" selected>Brick</option>
+            <option value="cinder">Concrete block</option>
+            <option value="glassBlock">Glass block</option>
+            <option value="hay">Hay bales</option>
+            <option value="cheese">Indestructible cheese (Day 1)</option>
+          </select>
+        </label>
+        <label
+          >Impact speed <span id="speed-label" class="mono">80 km/h</span>
+          <input id="speed" type="range" min="10" max="150" step="5" value="80" />
+        </label>
+        <div class="row buttons">
+          <button id="btn-crash" class="primary">Crash</button>
+          <button id="btn-reset">Reset</button>
+          <button id="btn-replay" title="Run it again from the start (deterministic)">Replay</button>
+        </div>
+      </section>
+
+      <section id="gallery-controls" hidden>
+        <label
+          >Projectile
+          <select id="projectile">
+            <option value="tennis">Tennis ball (57 g)</option>
+            <option value="golf">Golf ball (46 g)</option>
+            <option value="bearing">Steel ball bearing (510 g)</option>
+            <option value="bowling" selected>Bowling ball (6.35 kg)</option>
+            <option value="melon">Watermelon (5.3 kg)</option>
+            <option value="chicken">Frozen chicken (1.6 kg)</option>
+          </select>
+        </label>
+        <label
+          >Target
+          <select id="target">
+            <option value="glass" selected>Window glass, 6 mm</option>
+            <option value="drywall">Plasterboard, 12.5 mm</option>
+            <option value="plywood">Plywood, 18 mm</option>
+            <option value="ice">Ice slab, 10 cm</option>
+            <option value="brick">Brick panel</option>
+            <option value="cheese">Indestructible cheese</option>
+          </select>
+        </label>
+        <label
+          >Launch speed <span id="launch-label" class="mono">30 m/s</span>
+          <input id="launch" type="range" min="5" max="100" step="1" value="30" />
+        </label>
+        <div class="row buttons">
+          <button id="btn-fire" class="primary">Fire</button>
+          <button id="btn-new-target">New target</button>
+          <button id="btn-replay-g" title="Re-fire every shot at a fresh target">Replay</button>
+        </div>
+      </section>
+
+      <div class="grid2">
+        <label
+          >Slow motion
+          <select id="slowmo">
+            <option value="auto" selected>Automatic</option>
+            <option value="1">Real time</option>
+            <option value="0.25">¼ speed</option>
+            <option value="0.1">1/10 speed</option>
+            <option value="0.025">1/40 speed</option>
+          </select>
+        </label>
+        <label
+          >Camera
+          <select id="camera">
+            <option value="cinematic" selected>Cinematic</option>
+            <option value="side">Side</option>
+            <option value="front">Behind the target</option>
+            <option value="top">Overhead</option>
+            <option value="onboard">Onboard</option>
+            <option value="free">Free (drag to orbit)</option>
+          </select>
+        </label>
+      </div>
+      <label class="check"><input id="sound" type="checkbox" checked /> Sound</label>
+
+      <div id="readout" class="readout" aria-live="polite"></div>
+      <details>
+        <summary>Engine stats</summary>
+        <pre id="stats" class="mono"></pre>
+      </details>
+      <p class="fine">
+        Fictional test rig for entertainment. Materials are tuned to look right, not measured: nothing here is
+        engineering or safety data.
+      </p>
+    </aside>
+    <div id="hud" aria-hidden="true"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

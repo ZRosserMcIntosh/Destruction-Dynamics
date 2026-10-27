@@ -4,6 +4,25 @@ The rule: every absurd challenge a subscriber sets gets built, and whatever it
 teaches goes into the engine, not into a one-off scenario hack. This ledger
 records each challenge and what the engine gained from it.
 
+## Day 2: Impact Lab (car into a wall, everyday objects into panels)
+
+Proposed on the channel as the follow-up to Day 1: crash a test car into a
+brick wall, and fire different things at different materials. Built as a
+separate app, `apps/impact-lab`. The cheese is back as an indestructible wall
+and target.
+
+| Lesson | What changed in the engine |
+|---|---|
+| Things must break where they are hit, not along pre-cut seams | **Support graph + Voronoi shatter at the impact point** (`BondGraph`, `voronoiBox`): joints with capacity and accumulated impulse damage; boxes shatter radially (plates) or around the hit (blocks), cells inherit joints across the faces they touch (ADR 0010) |
+| A rigid solver stops a fast car or ball dead against a fixed wall before the wall can break | **Momentum sharing on break-through**: when an impact frees pieces, the impactor and the freed pieces leave together with the impactor's pre-step momentum |
+| Against a rigid wall a car's front crushes at full speed, so at 120 km/h it reached the cabin before the wall failed, and the wall felt the same force at every speed | **Riera crush model**: the wall feels the crush force plus μv², the momentum flux of the front coming to rest, so fast hits load it much harder |
+| Damage centred on one point popped single bricks but the ring of joints around the car's footprint held | **A wide impactor strikes every piece it touches**, each on its own joints, applied as one batch with a single rebuild |
+| Bricks only fell where they were hit, leaving a cartoon car-shaped hole | **Gravity sag**: pieces with nothing below wear down their remaining joints by weight, giving the stepped arch of real masonry |
+| A small, fast golf ball must not pass through 6 mm glass | **Continuous collision** on projectiles; a test fires one at 80 m/s into plywood |
+| Hundreds of brick chips colliding with each other made the solver the bottleneck | **Chip collision group**: loose pieces under 6 cm only collide with the ground and impactors |
+| Every contact event recomputed every pose in a 700-brick wall (0.5 ms per event) | **Fixed bodies skip pose refresh**, the impact search uses an index queue and stamp arrays instead of `shift()` and Sets: about 0.1 ms per event |
+| Rapier panics (WASM `unreachable`) when a body removed by a fracture is read later in the same step | **Check bodies still exist** before reading them across a rebuild |
+
 ## Day 1: "A giant block of cheese in the center forever (make it indestructible pls)"
 
 Requested by @Fartman32. Built as the `cheese` variant of The Deep End
