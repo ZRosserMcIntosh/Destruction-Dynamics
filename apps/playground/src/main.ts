@@ -238,8 +238,8 @@ async function start(): Promise<void> {
       if (!scrubbing) timeline.value = String(d.state === 'INTACT' ? tMin : Math.min(tMax, d.time));
       $('timeline-label').textContent = d.state === 'INTACT' ? 'intact' : `${d.time.toFixed(1)} s`;
       pauseBtn.textContent = d.paused ? 'Resume' : 'Pause';
-      // Floors are solved in a worker; starting before they are ready would let
-      // the tower pass through obstacles, so hold Play until then.
+      // Floors stream in from a worker; Play waits only for the first chunk
+      // (otherwise the tower could pass through obstacles).
       const solving = sim.layerStatus === 'computing';
       for (const id of ['btn-play', 'btn-trigger']) ($(id) as HTMLButtonElement).disabled = solving;
       $('btn-play').textContent = solving ? 'Solving floors…' : 'Play';
@@ -263,7 +263,9 @@ async function start(): Promise<void> {
             ? 'authored wreck'
             : s.layers.status === 'computing'
               ? 'solving in worker…'
-              : `simulated (${(s.layers.computeMs ?? 0).toFixed(0)} ms, ${s.layers.jointsBroken ?? 0}/${s.layers.joints ?? 0} joints broke)`
+              : s.layers.status === 'streaming'
+                ? 'simulated, streaming in from the worker…'
+                : `simulated (${(s.layers.computeMs ?? 0).toFixed(0)} ms, ${s.layers.jointsBroken ?? 0}/${s.layers.joints ?? 0} joints broke)`
         }`,
         `draws ${i.calls} · tris ${(i.triangles / 1000).toFixed(0)}k · px ${i.pixelRatio.toFixed(2)}`,
         `camera ${rig.mode}${rig.mode === 'cinematic' ? ` (${rig.shotName})` : ''}${i.underwater ? ' · underwater' : ''}`,

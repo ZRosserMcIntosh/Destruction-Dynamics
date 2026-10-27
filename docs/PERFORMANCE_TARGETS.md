@@ -36,7 +36,7 @@ container), 2026-10-23. Each figure is the mean (and p95) time per call.
 | Tower section poses at an event time | 0.002 ms |
 | Facade plan build (2,720 panels) | 0.94 ms, once per seed or preset change |
 | Director update | below 0.001 ms |
-| Floor-layer precompute (once per seed or preset, in a Web Worker in the browser) | 12 layers 47 ms · 26 layers 0.22 s · 77 floors 0.52 s · 77 floors + cheese wedge 1.16 s (warm means) |
+| Floor-layer precompute (once per seed or preset, in a Web Worker in the browser) | Streamed: playback starts after the first chunk, 9–29 ms. Full solve: 12 layers 0.10 s · 26 layers 0.23 s · 77 floors 0.70 s · 77 floors + cheese wedge 1.13 s (warm, Node) |
 
 The raw output is written to `benchmarks/results/latest.json`. CI runs the
 benchmark job and uploads it as an artifact.

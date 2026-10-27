@@ -67,6 +67,7 @@ import {
   depthWithObstacles,
   groundWithObstacles,
 } from '@destruction-dynamics/scenarios';
+import type { LayerMessage } from './layerWorker';
 import {
   type Footprint,
   emitBubbles,
@@ -78,6 +79,8 @@ import {
   emitSplash,
   emitSpraySheet,
 } from './effects';
+
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 export interface Floater {
   kind: PropKind;
@@ -122,8 +125,9 @@ export class DeepEndSimulation {
   navigationVersion = 0;
   readonly cueLog: string[] = [];
   /** Floor-layer solver state: authored (off), computing (in a worker) or ready. */
-  layerStatus: 'authored' | 'computing' | 'ready' = 'authored';
-  private pendingLayers: LayerSimulationResult | null = null;
+  layerStatus: 'authored' | 'computing' | 'streaming' | 'ready' = 'authored';
+  /** A layer result streaming in from the worker (keyframes fill in as they arrive). */
+  private stream: { result: Mutable<LayerSimulationResult>; ready: number } | null = null;
   private layerWorker: Worker | null = null;
   private layerJob = 0;
   peakWave = 0;
@@ -243,7 +247,7 @@ export class DeepEndSimulation {
         obstacles: this.variant.obstacles,
       },
     );
-    this.pendingLayers = null;
+    this.stream = null;
     this.layerStatus = !layered ? 'authored' : useWorker ? 'computing' : 'ready';
     if (useWorker) this.requestLayers();
     this.plan = buildFacadePlan(
@@ -257,15 +261,41 @@ export class DeepEndSimulation {
     this.layoutVersion++;
   }
 
-  /** Computes the floor layers in a Web Worker so the main thread never stalls. */
+  /** Computes the floor layers in a Web Worker and streams keyframes in as they are solved. */
   private requestLayers(): void {
     this.layerWorker ??= new Worker(new URL('./layerWorker.ts', import.meta.url), { type: 'module' });
     const id = ++this.layerJob;
     const tower = this.tower;
-    this.layerWorker.onmessage = (e: MessageEvent<{ id: number; result: LayerSimulationResult }>) => {
-      if (e.data.id !== this.layerJob || tower !== this.tower) return;
-      this.pendingLayers = e.data.result;
-      this.layerStatus = 'ready';
+    const layers = tower.sections.length - 1;
+    this.layerWorker.onmessage = (e: MessageEvent<LayerMessage>) => {
+      const m = e.data;
+      if (m.id !== this.layerJob || tower !== this.tower) return;
+      if (m.kind === 'frames') {
+        if (!this.stream) {
+          this.stream = {
+            ready: 0,
+            result: {
+              hz: m.hz,
+              frames: m.total,
+              layers,
+              data: new Float32Array(m.total * layers * 7),
+              jointBreakTimes: new Float32Array(0),
+              // Until the solve ends, assume the pile moves until SETTLING ends.
+              settledAfter: (m.total - 1) / m.hz,
+              computeMs: 0,
+            },
+          };
+        }
+        this.stream.result.data.set(m.slice, m.from * layers * 7);
+        this.stream.ready = m.to;
+        if (this.layerStatus === 'computing') this.layerStatus = 'streaming';
+      } else if (this.stream) {
+        this.stream.result.jointBreakTimes = m.jointBreakTimes;
+        this.stream.result.settledAfter = m.settledAfter;
+        this.stream.result.computeMs = m.computeMs;
+        this.stream.result.substeps = m.substeps;
+        this.layerStatus = 'ready';
+      }
       this.tryAttachLayers();
     };
     this.layerWorker.onerror = (err) => {
@@ -275,16 +305,26 @@ export class DeepEndSimulation {
     this.layerWorker.postMessage({ id, ...tower.layerSolverInput() });
   }
 
-  /** Attaches a finished layer result unless the tower is already past impact (avoids a visible jump). */
+  /**
+   * Attaches the streaming result as soon as its first keyframes arrive, unless
+   * the tower is already past release (that would jump; it waits for a reset).
+   * Once attached, later chunks just extend it.
+   */
   private tryAttachLayers(): void {
-    const r = this.pendingLayers;
-    if (!r) return;
+    const st = this.stream;
+    if (!st || st.ready === 0) return;
+    if (this.attachedStream === st.result) {
+      this.tower.extendLayers(st.ready);
+      return;
+    }
     const d = this.director;
-    const safe = !d.committed || d.time < this.timeline.impact - 0.25 || d.state === 'RESTORATION';
+    const safe = !d.committed || d.time < this.tower.releaseTime - 0.25 || d.state === 'RESTORATION';
     if (!safe) return;
-    this.tower.attachLayers(r);
-    this.pendingLayers = null;
+    this.tower.attachLayers(st.result, st.ready);
+    this.attachedStream = st.result;
   }
+
+  private attachedStream: LayerSimulationResult | null = null;
 
   private spawnFloaters(): void {
     for (const f of this.floaters) this.physics.removeBody(f.handle);
@@ -495,7 +535,7 @@ export class DeepEndSimulation {
     if (wasCommitted && d.committed && d.time > prevTime && simDt > 0)
       this.detachPanels(prevTime, d.time, simDt);
 
-    if (this.pendingLayers) this.tryAttachLayers();
+    if (this.stream && this.attachedStream !== this.stream.result) this.tryAttachLayers();
     const mode = towerCollisionModeAt(
       d.state,
       d.time,
