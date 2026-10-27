@@ -77,11 +77,17 @@ const WATER = 1025;
 const SIGNS = [-1, 1] as const;
 
 const MAX_SPEED = 70;
-/** Penetration (m) that counts as a crushing hit, and the share of velocity kept after one. */
-const CRUSH_DEPTH = 0.05;
-const CRUSH_KEEP = 0.82;
 /** Fastest speed (m/s) at which a contact may push overlapping bodies apart. */
 const MAX_DEPENETRATION = 6;
+/** Velocity pass: bounce kept from real impacts (concrete barely bounces). */
+const RESTITUTION = 0.1;
+/** Dynamic friction coefficient (structure on structure, ground and obstacles). */
+const FRICTION = 0.8;
+const CONTACT_STRIDE = 13;
+/** A layer sleeps after SLEEP_AFTER seconds below these speeds (m/s, rad/s). */
+const SLEEP_SPEED = 0.3;
+const SLEEP_SPIN = 0.06;
+const SLEEP_AFTER = 1;
 /** Adaptive substeps: at least this many, and a substep may move a layer at most this fraction of its thickness. */
 const MIN_SUBSTEPS = 2;
 const SUBSTEP_TRAVEL = 0.15;
@@ -116,11 +122,17 @@ export class LayerSolver {
   private readonly floodRate: Float64Array;
   private readonly restTime: Float64Array;
   private readonly asleep: Uint8Array;
-  /** Set when a body was pushed out of the ground or an obstacle this substep. */
-  private readonly crushed: Uint8Array;
+  /**
+   * Contacts found this substep, for the velocity pass. Per contact: a, b
+   * (−1 = static), local point on a (3), local point on b (3), normal along
+   * which a was pushed (3), positional multiplier λ, normal velocity before
+   * the position solve.
+   */
+  private contacts = new Float64Array(CONTACT_STRIDE * 1024);
+  private contactCount = 0;
+  /** Set when a body touched the ground, an obstacle or another layer this substep. */
+  private touching = new Uint8Array(0);
   /** One contact normal per body this substep, used to cap how fast contacts separate. */
-  private readonly CN: Float64Array;
-  private readonly hasNormal: Uint8Array;
   // Per joint (4 per interface between layer k and k + 1).
   private readonly jl: Float64Array; // la xyz, lb xyz
   private readonly jStrength: Float64Array;
@@ -178,9 +190,7 @@ export class LayerSolver {
     this.floodRate = f();
     this.restTime = f();
     this.asleep = new Uint8Array(total);
-    this.crushed = new Uint8Array(total);
-    this.CN = new Float64Array(total * 3);
-    this.hasNormal = new Uint8Array(total);
+    this.touching = new Uint8Array(total);
     const rng = new SeededRandom(opts.seed);
     layers.forEach((l, i) => {
       const he = l.halfExtents;
@@ -318,15 +328,6 @@ export class LayerSolver {
   private allowed(depth: number, prevDepth: number, h: number): number {
     const old = Math.max(0, Math.min(depth, prevDepth));
     return depth - old + Math.min(old, MAX_DEPENETRATION * h);
-  }
-
-  /** Remembers the contact normal of body i this substep (for the separation clamp). */
-  private noteNormal(i: number, nx: number, ny: number, nz: number): void {
-    if (i >= this.n) return;
-    this.CN[i * 3] = nx;
-    this.CN[i * 3 + 1] = ny;
-    this.CN[i * 3 + 2] = nz;
-    this.hasNormal[i] = 1;
   }
 
   /** World inverse inertia of body i applied to (x, y, z). */
@@ -527,11 +528,25 @@ export class LayerSolver {
             const g = this.ground(px, pz);
             const depth = g - (X[i * 3 + 1]! + ry);
             if (depth <= 0) continue;
-            if (depth > CRUSH_DEPTH) this.crushed[i] = 1;
             this.prevWorld(i, lx, ly, lz);
             const prevDepth = this.ground(this.ox, this.oz) - this.oy;
-            this.noteNormal(i, 0, 1, 0);
-            this.correct(i, rx, ry, rz, -1, 0, 0, 0, 0, 1, 0, this.allowed(depth, prevDepth, h), 0, h);
+            const lam = this.correct(
+              i,
+              rx,
+              ry,
+              rz,
+              -1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              this.allowed(depth, prevDepth, h),
+              0,
+              h,
+            );
+            this.record(i, lx, ly, lz, -1, 0, 0, 0, 0, 1, 0, lam);
             // Undo tangential slip of this corner during the substep (static friction).
             this.rot(i, lx, ly, lz);
             rx = this.ox;
@@ -609,35 +624,12 @@ export class LayerSolver {
       }
     }
 
-    // Velocities from positions; sleep bodies that have stayed still.
+    // Velocities from positions.
     for (let i = 0; i < n; i++) {
       if (this.asleep[i]) continue;
-      let vx = (X[i * 3]! - PX[i * 3]!) / h,
-        vy = (X[i * 3 + 1]! - PX[i * 3 + 1]!) / h,
-        vz = (X[i * 3 + 2]! - PX[i * 3 + 2]!) / h;
-      // Contacts may stop a body, but never fling it: cap the separating speed.
-      if (this.hasNormal[i]) {
-        const cnx = this.CN[i * 3]!,
-          cny = this.CN[i * 3 + 1]!,
-          cnz = this.CN[i * 3 + 2]!;
-        const vn = vx * cnx + vy * cny + vz * cnz;
-        if (vn > MAX_DEPENETRATION) {
-          vx -= (vn - MAX_DEPENETRATION) * cnx;
-          vy -= (vn - MAX_DEPENETRATION) * cny;
-          vz -= (vn - MAX_DEPENETRATION) * cnz;
-        }
-        this.hasNormal[i] = 0;
-      }
-      // Safety clamp: no structural piece outruns the fall itself.
-      const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      // Crushing concrete absorbs energy: a hard push-out this substep may not
-      // turn into a rebound (position-based contacts otherwise conserve it).
-      const crush = this.crushed[i] ? CRUSH_KEEP : 1;
-      this.crushed[i] = 0;
-      const k = (sp > MAX_SPEED ? MAX_SPEED / sp : 1) * crush;
-      V[i * 3] = vx * k;
-      V[i * 3 + 1] = vy * k;
-      V[i * 3 + 2] = vz * k;
+      V[i * 3] = (X[i * 3]! - PX[i * 3]!) / h;
+      V[i * 3 + 1] = (X[i * 3 + 1]! - PX[i * 3 + 1]!) / h;
+      V[i * 3 + 2] = (X[i * 3 + 2]! - PX[i * 3 + 2]!) / h;
       // ω from Δq = q · conj(q_prev).
       const ax = Q[i * 4]!,
         ay = Q[i * 4 + 1]!,
@@ -647,22 +639,215 @@ export class LayerSolver {
         by = -PQ[i * 4 + 1]!,
         bz = -PQ[i * 4 + 2]!,
         bw = PQ[i * 4 + 3]!;
-      const dx = aw * bx + ax * bw + ay * bz - az * by;
-      const dy = aw * by - ax * bz + ay * bw + az * bx;
-      const dz = aw * bz + ax * by - ay * bx + az * bw;
       const dw = aw * bw - ax * bx - ay * by - az * bz;
       const s = dw >= 0 ? 2 / h : -2 / h;
-      W[i * 3] = dx * s * crush;
-      W[i * 3 + 1] = dy * s * crush;
-      W[i * 3 + 2] = dz * s * crush;
-      const still = vx * vx + vy * vy + vz * vz < 0.01 && (dx * dx + dy * dy + dz * dz) * s * s < 0.002;
+      W[i * 3] = (aw * bx + ax * bw + ay * bz - az * by) * s;
+      W[i * 3 + 1] = (aw * by - ax * bz + ay * bw + az * bx) * s;
+      W[i * 3 + 2] = (aw * bz + ax * by - ay * bx + az * bw) * s;
+    }
+
+    // Velocity pass: restitution and dynamic friction at every contact.
+    this.solveVelocities(h);
+
+    // Safety clamp, then sleep bodies that have stayed still.
+    for (let i = 0; i < n; i++) {
+      if (this.asleep[i]) continue;
+      const vx = V[i * 3]!,
+        vy = V[i * 3 + 1]!,
+        vz = V[i * 3 + 2]!;
+      const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
+      if (sp > MAX_SPEED) {
+        const k = MAX_SPEED / sp;
+        V[i * 3] = vx * k;
+        V[i * 3 + 1] = vy * k;
+        V[i * 3 + 2] = vz * k;
+      }
+      const w2 = W[i * 3]! ** 2 + W[i * 3 + 1]! ** 2 + W[i * 3 + 2]! ** 2;
+      // Only a body that is resting on something may sleep: one still sinking
+      // through open water keeps going, however slowly.
+      const still = this.touching[i] === 1 && sp * sp < SLEEP_SPEED ** 2 && w2 < SLEEP_SPIN ** 2;
+      this.touching[i] = 0;
       this.restTime[i] = still ? this.restTime[i]! + h : 0;
-      if (this.restTime[i]! > 0.6) {
+      if (this.restTime[i]! > SLEEP_AFTER) {
         this.asleep[i] = 1;
         V.fill(0, i * 3, i * 3 + 3);
         W.fill(0, i * 3, i * 3 + 3);
       }
     }
+  }
+
+  /** Relative velocity of a's local point minus b's (b < 0: static), along (nx, ny, nz). */
+  private relNormalVelocity(
+    a: number,
+    lax: number,
+    lay: number,
+    laz: number,
+    b: number,
+    lbx: number,
+    lby: number,
+    lbz: number,
+    nx: number,
+    ny: number,
+    nz: number,
+  ): number {
+    const V = this.V,
+      W = this.W;
+    this.rot(a, lax, lay, laz);
+    let vx = V[a * 3]! + W[a * 3 + 1]! * this.oz - W[a * 3 + 2]! * this.oy;
+    let vy = V[a * 3 + 1]! + W[a * 3 + 2]! * this.ox - W[a * 3]! * this.oz;
+    let vz = V[a * 3 + 2]! + W[a * 3]! * this.oy - W[a * 3 + 1]! * this.ox;
+    if (b >= 0) {
+      this.rot(b, lbx, lby, lbz);
+      vx -= V[b * 3]! + W[b * 3 + 1]! * this.oz - W[b * 3 + 2]! * this.oy;
+      vy -= V[b * 3 + 1]! + W[b * 3 + 2]! * this.ox - W[b * 3]! * this.oz;
+      vz -= V[b * 3 + 2]! + W[b * 3]! * this.oy - W[b * 3 + 1]! * this.ox;
+    }
+    this.vx = vx;
+    this.vy = vy;
+    this.vz = vz;
+    return vx * nx + vy * ny + vz * nz;
+  }
+
+  private vx = 0;
+  private vy = 0;
+  private vz = 0;
+
+  /** Records a contact for the velocity pass (velocities are still the predicted ones here). */
+  private record(
+    a: number,
+    lax: number,
+    lay: number,
+    laz: number,
+    b: number,
+    lbx: number,
+    lby: number,
+    lbz: number,
+    nx: number,
+    ny: number,
+    nz: number,
+    lambda: number,
+  ): void {
+    if (b >= this.n) b = -1;
+    this.touching[a] = 1;
+    if (b >= 0) this.touching[b] = 1;
+    if (this.contactCount * CONTACT_STRIDE >= this.contacts.length) {
+      const grown = new Float64Array(this.contacts.length * 2);
+      grown.set(this.contacts);
+      this.contacts = grown;
+    }
+    const vn = this.relNormalVelocity(a, lax, lay, laz, b, lbx, lby, lbz, nx, ny, nz);
+    const c = this.contacts,
+      k = this.contactCount++ * CONTACT_STRIDE;
+    c[k] = a;
+    c[k + 1] = b;
+    c[k + 2] = lax;
+    c[k + 3] = lay;
+    c[k + 4] = laz;
+    c[k + 5] = lbx;
+    c[k + 6] = lby;
+    c[k + 7] = lbz;
+    c[k + 8] = nx;
+    c[k + 9] = ny;
+    c[k + 10] = nz;
+    c[k + 11] = lambda;
+    c[k + 12] = vn;
+  }
+
+  /**
+   * Velocity pass (Müller et al. 2020): at every contact, set the normal
+   * velocity to the restitution target (a little bounce for real impacts,
+   * none for resting contact or for the push-out of an overlap) and apply
+   * dynamic friction proportional to the normal force. This is what lets a
+   * pile come to rest, and it stops position corrections turning into launches.
+   */
+  private solveVelocities(h: number): void {
+    const c = this.contacts,
+      V = this.V,
+      W = this.W;
+    for (let k = 0; k < this.contactCount * CONTACT_STRIDE; k += CONTACT_STRIDE) {
+      const a = c[k]!,
+        b = c[k + 1]!;
+      if (this.asleep[a] && (b < 0 || this.asleep[b])) continue;
+      const nx = c[k + 8]!,
+        ny = c[k + 9]!,
+        nz = c[k + 10]!;
+      const vn = this.relNormalVelocity(
+        a,
+        c[k + 2]!,
+        c[k + 3]!,
+        c[k + 4]!,
+        b,
+        c[k + 5]!,
+        c[k + 6]!,
+        c[k + 7]!,
+        nx,
+        ny,
+        nz,
+      );
+      const tx = this.vx - vn * nx,
+        ty = this.vy - vn * ny,
+        tz = this.vz - vn * nz;
+      const vt = Math.sqrt(tx * tx + ty * ty + tz * tz);
+      // Contact offsets (world) on both bodies.
+      this.rot(a, c[k + 2]!, c[k + 3]!, c[k + 4]!);
+      const rax = this.ox,
+        ray = this.oy,
+        raz = this.oz;
+      let rbx = 0,
+        rby = 0,
+        rbz = 0;
+      if (b >= 0) {
+        this.rot(b, c[k + 5]!, c[k + 6]!, c[k + 7]!);
+        rbx = this.ox;
+        rby = this.oy;
+        rbz = this.oz;
+      }
+      // Restitution: bounce only off real impacts, and never more than they had.
+      const vnPrev = c[k + 12]!;
+      const e = vnPrev < -2 * G * h ? RESTITUTION : 0;
+      const target = vnPrev < 0 ? -e * vnPrev : 0;
+      let dx = nx * (target - vn),
+        dy = ny * (target - vn),
+        dz = nz * (target - vn);
+      // Dynamic friction: at most μ times the normal speed change this contact's push produced.
+      if (vt > 1e-9) {
+        const wn =
+          this.gim(a, rax, ray, raz, nx, ny, nz) + (b >= 0 ? this.gim(b, rbx, rby, rbz, nx, ny, nz) : 0);
+        const cut = Math.min((FRICTION * c[k + 11]! * wn) / h, vt) / vt;
+        dx -= tx * cut;
+        dy -= ty * cut;
+        dz -= tz * cut;
+      }
+      const dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dl < 1e-9) continue;
+      const ux = dx / dl,
+        uy = dy / dl,
+        uz = dz / dl;
+      // Impulse along Δv through both bodies' generalised inverse masses.
+      const wsum =
+        this.gim(a, rax, ray, raz, ux, uy, uz) + (b >= 0 ? this.gim(b, rbx, rby, rbz, ux, uy, uz) : 0);
+      const p = dl / wsum;
+      const px = ux * p,
+        py = uy * p,
+        pz = uz * p;
+      V[a * 3]! += px * this.im[a]!;
+      V[a * 3 + 1]! += py * this.im[a]!;
+      V[a * 3 + 2]! += pz * this.im[a]!;
+      this.invI(a, ray * pz - raz * py, raz * px - rax * pz, rax * py - ray * px);
+      W[a * 3]! += this.ox;
+      W[a * 3 + 1]! += this.oy;
+      W[a * 3 + 2]! += this.oz;
+      if (b >= 0) {
+        V[b * 3]! -= px * this.im[b]!;
+        V[b * 3 + 1]! -= py * this.im[b]!;
+        V[b * 3 + 2]! -= pz * this.im[b]!;
+        this.invI(b, rby * pz - rbz * py, rbz * px - rbx * pz, rbx * py - rby * px);
+        W[b * 3]! -= this.ox;
+        W[b * 3 + 1]! -= this.oy;
+        W[b * 3 + 2]! -= this.oz;
+      }
+    }
+    this.contactCount = 0;
   }
 
   private interfaceIntact(i: number): boolean {
@@ -774,10 +959,9 @@ export class LayerSolver {
     const nx = this.ox,
       ny = this.oy,
       nz = this.oz;
-    this.noteNormal(i, nx, ny, nz);
-    if (depth > CRUSH_DEPTH) this.crushed[i] = 1;
     if (depth > 0.02) this.wake(i);
-    this.correct(i, rx, ry, rz, -1, 0, 0, 0, nx, ny, nz, depth, 0, h);
+    const lam = this.correct(i, rx, ry, rz, -1, 0, 0, 0, nx, ny, nz, depth, 0, h);
+    this.record(i, lx, ly, lz, -1, 0, 0, 0, nx, ny, nz, lam);
     this.obstacleFriction(i, o, lx, ly, lz, 0, 0, 0, nx, ny, nz, depth, h);
   }
 
@@ -833,13 +1017,11 @@ export class LayerSolver {
     const wnx = this.ox,
       wny = this.oy,
       wnz = this.oz;
-    this.noteNormal(a, -wnx, -wny, -wnz);
-    this.noteNormal(b, wnx, wny, wnz);
     if (depth > 0.02) {
       if (a < this.n) this.wake(a);
       if (b < this.n) this.wake(b);
     }
-    this.correct(
+    const lam = this.correct(
       a,
       rax,
       ray,
@@ -855,6 +1037,9 @@ export class LayerSolver {
       0,
       h,
     );
+    // a was pushed along +n. Record with the moving layer first (obstacles are static).
+    if (a >= this.n) this.record(b, lx, ly, lz, -1, 0, 0, 0, -wnx, -wny, -wnz, lam);
+    else this.record(a, lx0, ly0, lz0, b, lx, ly, lz, wnx, wny, wnz, lam);
     if (a >= this.n || b >= this.n)
       this.obstacleFriction(a, b, lx0, ly0, lz0, lx, ly, lz, wnx, wny, wnz, depth, h);
   }
@@ -906,9 +1091,25 @@ export class LayerSolver {
     this.correct(layer, rx, ry, rz, -1, 0, 0, 0, -sx / slip, -sy / slip, -sz / slip, undo, 0, h);
   }
 
-  /** Runs the whole simulation and returns keyframes of layer origin poses. */
-  run(): LayerSimulationResult {
+  /**
+   * Runs the whole simulation and returns keyframes of layer origin poses.
+   * `onFrames(from, to, data)` is called as keyframes become ready (every
+   * `chunkFrames`, and once at the end), so a caller can start playing the
+   * collapse long before the solve finishes.
+   */
+  run(stream?: {
+    onFrames: (from: number, to: number, data: Float32Array) => void;
+    chunkFrames?: number;
+  }): LayerSimulationResult {
     const t0 = performance.now();
+    const chunk = Math.max(1, stream?.chunkFrames ?? 15);
+    let sent = 0;
+    const flush = (upTo: number) => {
+      if (stream && upTo > sent) {
+        stream.onFrames(sent, upTo, data);
+        sent = upTo;
+      }
+    };
     const { duration, keyframeHz, stepHz, substeps } = this.o;
     const n = this.n;
     const frames = Math.ceil(duration * keyframeHz) + 1;
@@ -957,6 +1158,7 @@ export class LayerSolver {
         write(frame++);
         nextKey += 1 / keyframeHz;
       }
+      if (frame - sent >= chunk) flush(frame);
       if (this.asleep.subarray(0, n).every((a) => a === 1)) {
         settledAfter = this.time;
         const last = (frame - 1) * n * 7;
@@ -964,6 +1166,7 @@ export class LayerSolver {
         break;
       }
     }
+    flush(frames);
     return {
       hz: keyframeHz,
       frames,
