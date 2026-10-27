@@ -4,7 +4,16 @@
 
 import type { SeededRandom } from '@destruction-dynamics/core';
 
-export const PARTICLE_KINDS = ['spray', 'mist', 'dust', 'glass', 'sparks', 'bubble', 'foam'] as const;
+export const PARTICLE_KINDS = [
+  'spray',
+  'mist',
+  'dust',
+  'glass',
+  'sparks',
+  'bubble',
+  'foam',
+  'juice',
+] as const;
 export type ParticleKind = (typeof PARTICLE_KINDS)[number];
 
 export interface KindParams {
@@ -84,6 +93,15 @@ export const KIND_PARAMS: Record<ParticleKind, KindParams> = {
     alpha: 0.4,
     additive: false,
     waterBehaviour: 'float',
+  },
+  juice: {
+    gravity: 1,
+    drag: 0.15,
+    growth: 0.02,
+    color: [0.82, 0.12, 0.18],
+    alpha: 0.85,
+    additive: false,
+    waterBehaviour: 'ignore',
   },
 };
 

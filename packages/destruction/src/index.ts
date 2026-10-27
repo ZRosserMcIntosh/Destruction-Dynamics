@@ -5,3 +5,4 @@ export * from './debris';
 export * from './collision';
 export * from './layerSolver';
 export * from './shapes';
+export * from './fracture';

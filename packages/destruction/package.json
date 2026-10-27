@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@destruction-dynamics/core": "0.1.0",
-    "@destruction-dynamics/physics": "0.1.0"
+    "@destruction-dynamics/physics": "0.1.0",
+    "@dimforge/rapier3d-compat": "^0.21.0"
   },
   "devDependencies": {
     "@destruction-dynamics/scenarios": "0.1.0"
