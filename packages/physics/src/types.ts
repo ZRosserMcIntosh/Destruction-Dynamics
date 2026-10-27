@@ -6,7 +6,11 @@ import type { Pose, Vec3 } from '@destruction-dynamics/core';
 
 export type BodyKind = 'dynamic' | 'kinematic' | 'static';
 
-export type ShapeDesc = { type: 'box'; halfExtents: Vec3 } | { type: 'sphere'; radius: number };
+export type ShapeDesc =
+  | { type: 'box'; halfExtents: Vec3 }
+  | { type: 'sphere'; radius: number }
+  /** Convex hull of points in the body frame (static obstacles, props). */
+  | { type: 'convex'; points: Vec3[] };
 
 export interface BodyDesc {
   kind: BodyKind;
@@ -66,7 +70,28 @@ export interface PhysicsAdapter {
 
 export const DEFAULT_GRAVITY: Vec3 = { x: 0, y: -9.81, z: 0 };
 
-export const shapeVolume = (s: ShapeDesc): number =>
-  s.type === 'box'
-    ? 8 * s.halfExtents.x * s.halfExtents.y * s.halfExtents.z
-    : (4 / 3) * Math.PI * s.radius ** 3;
+/** Axis-aligned half extents and centre of a convex point set. */
+export function pointsBounds(points: Vec3[]): { center: Vec3; halfExtents: Vec3 } {
+  const lo = { x: Infinity, y: Infinity, z: Infinity };
+  const hi = { x: -Infinity, y: -Infinity, z: -Infinity };
+  for (const p of points) {
+    lo.x = Math.min(lo.x, p.x);
+    lo.y = Math.min(lo.y, p.y);
+    lo.z = Math.min(lo.z, p.z);
+    hi.x = Math.max(hi.x, p.x);
+    hi.y = Math.max(hi.y, p.y);
+    hi.z = Math.max(hi.z, p.z);
+  }
+  return {
+    center: { x: (lo.x + hi.x) / 2, y: (lo.y + hi.y) / 2, z: (lo.z + hi.z) / 2 },
+    halfExtents: { x: (hi.x - lo.x) / 2, y: (hi.y - lo.y) / 2, z: (hi.z - lo.z) / 2 },
+  };
+}
+
+export const shapeVolume = (s: ShapeDesc): number => {
+  if (s.type === 'box') return 8 * s.halfExtents.x * s.halfExtents.y * s.halfExtents.z;
+  if (s.type === 'sphere') return (4 / 3) * Math.PI * s.radius ** 3;
+  // Bounding-box estimate; convex shapes are used for static bodies, where mass does not matter.
+  const h = pointsBounds(s.points).halfExtents;
+  return 8 * h.x * h.y * h.z;
+};

@@ -39,18 +39,29 @@ time.
   SETTLING ends), then switches to static wreck boxes.
 - Potato keeps the authored wreck (`layerSimulation: false`).
 
+## Amendments (Day 1 challenge: the indestructible cheese)
+
+- Static convex obstacles; layers release at first obstacle contact.
+- Joints break by carried force (multiplier / h²), not stretch.
+- New penetration is resolved in full; old overlap leaks at ≤ 6 m/s; contacts
+  never push bodies apart faster than that. Crushing contacts lose 18% of
+  velocity. Friction against obstacles.
+- Adaptive substeps (2–6) and a cached ground grid.
+- Details and measurements: [LESSONS.md](../LESSONS.md).
+
 ## Consequences
 
-- Precompute cost, measured in Node on a 2.1 GHz Xeon vCPU: about 0.12 s
-  for 12 layers, 0.2–0.3 s for 26, and 1.1–1.6 s for 77. It runs off the
-  main thread in the browser.
+- Precompute cost, measured in Node on a 2.1 GHz Xeon vCPU (warm, `npm run
+  bench`): 47 ms for 12 layers, 0.22 s for 26, 0.52 s for 77, 1.16 s for 77
+  with the cheese wedge. It runs off the main thread in the browser.
 - The step uses only arithmetic and `sqrt`, so a given engine reproduces it
   exactly. Across browsers it also depends on the scenario's ground function
   (`Math.pow`), so cross-engine bit-equality is not guaranteed. Gameplay
   should use the collision boxes, which every client derives from the same
   keyframes.
 - Layer-to-layer contact covers neighbours up to two indices apart. Layers
-  further apart can overlap in rare piles. A broad-phase is future work.
+  further apart can overlap in rare piles. A full broad phase was tried and
+  needs the velocity contact pass first (LESSONS.md).
 - The playground draws each layer as its own group (core, slabs, panels).
   At 77 layers that is roughly 230 draw calls for the tower. Merging layers
   into one instanced draw is part of Milestone 7.

@@ -11,6 +11,7 @@ import {
   TowerView,
   UnderwaterView,
   createAtmosphere,
+  createCheeseWedge,
   createCity,
   createRoad,
   createSkyDome,
@@ -102,6 +103,10 @@ export class SceneView {
       ),
     );
     this.scene.add(createRoad(L.road.minX, L.road.maxX, L.cityLevel));
+    const wedge = sim.variant.cheeseWedge;
+    const o = sim.variant.obstacles[0];
+    if (wedge && o)
+      this.scene.add(createCheeseWedge(wedge, { position: o.position, quaternion: o.quaternion }));
     this.city = this.makeCity();
     this.scene.add(this.city);
 

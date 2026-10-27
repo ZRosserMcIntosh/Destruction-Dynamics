@@ -10,3 +10,4 @@ export * from './debrisView';
 export * from './underwater';
 export * from './debugDraw';
 export * from './props';
+export * from './cheese';

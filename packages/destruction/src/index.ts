@@ -4,3 +4,4 @@ export * from './facade';
 export * from './debris';
 export * from './collision';
 export * from './layerSolver';
+export * from './shapes';

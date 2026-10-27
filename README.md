@@ -60,6 +60,7 @@ first pass at parts of Milestone 4. Each row says how far it has been verified.
 | Authored tower collapse: stump plus 5 tipping sections, an inverted-pendulum tip remapped to the timeline, inter-section lag and whip, seeded wreck on the seabed, rewind on restoration | Implemented, tested, demonstrated | `packages/destruction/test`, e2e |
 | Facade failure plan (≈1000–3400 panels, seeded, scrubbable) feeding budgeted Rapier debris, plus glass particles | Implemented, tested, demonstrated | same |
 | Floor layers by fidelity: 5 / 12 / 26 / 77 layers (one per floor at Cinematic). From impact, each layer is its own rigid body with breakable slab joints, flooding buoyancy and seabed contact, precomputed in a Web Worker | Implemented, tested, demonstrated | `packages/destruction/test/layers.test.ts`, e2e test 9, [ADR 0009](docs/DECISIONS/0009-floor-layers.md) |
+| Viewer challenge, Day 1: an indestructible Swiss cheese wedge (`?scenario=cheese`). Static convex obstacles, release on first contact, force-based joint failure, friction. See [LESSONS.md](docs/LESSONS.md) | Implemented, tested, demonstrated | `packages/destruction/test/obstacles.test.ts`, `tests/e2e/cheese.spec.ts` |
 | Collision states (static intact, then kinematic while falling, then static wreck), derived from event time so they survive seeks and loads | Implemented, tested | destruction tests, `apps/playground/test` |
 | Physics adapter contract with Rapier and a dependency-free fallback | Implemented, tested | `packages/physics/test/contract.test.ts` |
 | Hybrid ocean: far-field Gerstner waves, a near-field linearised shallow-water solver (depth-dependent speed, land walls, sponge, foam advection), authored stadium-shaped impact surges, `WaterImpactEvent` input | Implemented, tested, demonstrated | `packages/fluids/test`, e2e |
@@ -109,6 +110,7 @@ docs/                 architecture, research, decisions (ADRs), roadmap, perform
 - [Performance targets and measurements](docs/PERFORMANCE_TARGETS.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Decisions](docs/DECISIONS/)
+- [Viewer challenges → engine lessons](docs/LESSONS.md)
 
 ## Content and safety notes
 
