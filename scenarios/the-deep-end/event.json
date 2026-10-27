@@ -188,7 +188,7 @@
           "type": "spray-sheet",
           "params": { "count": 6000 }
         },
-        { "id": "wi-mist", "at": 0.6, "channel": "particles", "type": "mist", "params": { "count": 900 } },
+        { "id": "wi-mist", "at": 0.6, "channel": "particles", "type": "mist", "params": { "count": 500 } },
         {
           "id": "wi-collision",
           "at": 2,

@@ -2,8 +2,8 @@
 // offshore on a boat, underwater swimming, and following debris.
 
 import { SeededRandom } from '@destruction-dynamics/core';
-import { deepEndGroundHeight } from '@destruction-dynamics/scenarios';
 import * as THREE from 'three';
+import { pushOutOfObstacle } from '@destruction-dynamics/destruction';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { DeepEndSimulation } from './simulation';
 
@@ -32,6 +32,32 @@ const SHOTS: Record<string, ShotFn> = {
   'beach-tracking': (s) => ({ pos: v(160, 7, 280), target: towerTop(s) }),
   'impact-wide': (_s, a) => ({ pos: v(600 - a * 4, 48, 470 - a * 3), target: v(190, 6, 0) }),
   'offshore-aftermath': (_s, a) => ({ pos: v(520 - a * 1.5, 20, 320 - a), target: v(200, -2, 0) }),
+};
+
+/** Middle of the cheese wedge's top face (apex + ⅔ radius along its axis). */
+const cheeseTop = (sim: DeepEndSimulation) => {
+  const o = sim.variant.obstacles[0]!;
+  const w = sim.variant.cheeseWedge!;
+  const q = new THREE.Quaternion(o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w);
+  return v(o.position.x, o.position.y, o.position.z).add(
+    v((2 * w.radius) / 3, w.height, 0).applyQuaternion(q),
+  );
+};
+
+/** Shots that replace the defaults when the scenario has a cheese wedge to show off. */
+const CHEESE_SHOTS: Record<string, ShotFn> = {
+  // Tower and wedge together from offshore and above.
+  'street-establishing': (s, a) => ({
+    pos: v(430, 140 - a, 300),
+    target: v(90, 70, 0).lerp(cheeseTop(s), 0.4),
+  }),
+  'offshore-wide': (s) => ({ pos: v(520, 90, 380), target: v(80, 80, 0).lerp(cheeseTop(s), 0.5) }),
+  // A slow, high orbit over the wedge: its triangle, rind and holes.
+  'offshore-aftermath': (s, a) => {
+    const c = cheeseTop(s);
+    const ang = 0.6 + a * 0.05;
+    return { pos: v(c.x + 210 * Math.cos(ang), c.y + 110, c.z + 210 * Math.sin(ang)), target: c };
+  },
 };
 
 export class CameraRig {
@@ -127,7 +153,8 @@ export class CameraRig {
         this.controls.update();
         break;
       case 'cinematic': {
-        const s = SHOTS[this.shot]!(sim, this.time - this.shotStart);
+        const shot = (sim.variant.cheeseWedge && CHEESE_SHOTS[this.shot]) || SHOTS[this.shot]!;
+        const s = shot(sim, this.time - this.shotStart);
         c.position.copy(s.pos);
         this.smoothTarget.lerp(s.target, 1 - Math.exp(-dt * 4));
         if (this.time - this.shotStart < 0.05) this.smoothTarget.copy(s.target);
@@ -185,13 +212,19 @@ export class CameraRig {
     if (this.keys.has('q') || this.keys.has('c')) move.y -= 1;
     if (move.lengthSq() > 0) c.position.addScaledVector(move.normalize(), speed * dt);
     // Collide with the seabed and with wreck sections (push out of their boxes).
-    const floor = deepEndGroundHeight(c.position.x, c.position.z) + 1.2;
+    const floor = this.sim.ground(c.position.x, c.position.z) + 1.2;
     if (c.position.y < floor) c.position.y = floor;
     const sim = this.sim;
-    sim.poses.forEach((pose, k) => {
-      if (k === 0) return;
-      const centre = sim.tower.sectionCenter(k, pose);
-      const half = sim.tower.sectionHalfExtents(k);
+    const boxes = sim.poses.slice(1).map((pose, i) => ({
+      centre: sim.tower.sectionCenter(i + 1, pose),
+      half: sim.tower.sectionHalfExtents(i + 1),
+      pose,
+    }));
+    for (const o of sim.variant.obstacles) {
+      const out = pushOutOfObstacle(o, c.position, 1);
+      c.position.set(out.x, out.y, out.z);
+    }
+    boxes.forEach(({ centre, half, pose }) => {
       const q = new THREE.Quaternion(
         pose.quaternion.x,
         pose.quaternion.y,

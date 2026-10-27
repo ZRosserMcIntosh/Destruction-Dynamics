@@ -80,7 +80,7 @@ export class NearFieldSolver {
     this.faceDepthU = new Float32Array((n + 1) * n);
     this.faceDepthW = new Float32Array(n * (n + 1));
     this.damping = o.damping ?? 0.04;
-    this.foamLifetime = o.foamLifetime ?? 6;
+    this.foamLifetime = o.foamLifetime ?? 4;
     const maxDepth = o.maxDepth ?? 60;
 
     let dMax = 1;
@@ -230,7 +230,8 @@ export class NearFieldSolver {
     const sub = Math.min(maxSubsteps, Math.max(1, Math.ceil(dt / this.maxStableDt)));
     const h = Math.min(dt / sub, this.maxStableDt);
     for (let s = 0; s < sub; s++) this.substep(h);
-    this.updateFoam(dt);
+    // Long steps (slow frames, degraded fluid rate) must not flood the surface with foam.
+    this.updateFoam(Math.min(dt, 0.1));
     this.pressure.fill(0);
     this.lastSubsteps = sub;
   }
@@ -315,7 +316,7 @@ export class NearFieldSolver {
         const slope = Math.sqrt(gx * gx + gz * gz);
         const crest = Math.max(0, eta[cell]! - 0.8);
         const speed = Math.sqrt(vx * vx + vz * vz);
-        const source = Math.max(0, slope - 0.12) * 4 + crest * 0.25 + Math.max(0, speed - 2.5) * 0.08;
+        const source = Math.max(0, slope - 0.2) * 2.5 + crest * 0.15 + Math.max(0, speed - 3.5) * 0.05;
         src[cell] = Math.min(1, advected * decay + source * dt);
       }
     foam.set(src);

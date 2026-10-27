@@ -173,7 +173,8 @@ export class HybridOcean implements FluidAdapter {
           for (const surge of surges) s += surgeHeight(surge, x, z, this._time);
           s *= fade;
           h += s;
-          foam = Math.min(1, foam + Math.max(0, s - 1.2) * 0.35);
+          // Only the breaking front of a surge foams, not the whole raised water.
+          foam = Math.min(1, foam + Math.max(0, s - 2.5) * 0.12);
         }
         composite[cell * 2] = h;
         composite[cell * 2 + 1] = foam;
