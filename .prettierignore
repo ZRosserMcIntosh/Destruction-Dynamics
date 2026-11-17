@@ -3,3 +3,5 @@ node_modules
 test-results
 package-lock.json
 *.md
+native/pole-dynamics/docs/traces
+native/**/build*
