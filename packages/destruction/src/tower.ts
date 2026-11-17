@@ -300,17 +300,41 @@ export class TowerCollapse {
     return impact;
   }
 
-  /** Switches from the authored wreck to simulated layers (e.g. when a worker finishes). */
-  attachLayers(result: LayerSimulationResult): void {
+  /**
+   * Switches from the authored wreck to simulated layers. `framesReady` lets a
+   * result be attached while it is still streaming in from a worker: playback
+   * holds at the last ready keyframe until more arrive (extendLayers).
+   */
+  attachLayers(result: LayerSimulationResult, framesReady = result.frames): void {
     if (result.layers !== this.sections.length - 1) throw new Error('layer result does not match this tower');
     this.layers = result;
-    const end = (result.frames - 1) / result.hz;
-    this.wreck = [this.intactPose(0), ...this.sections.slice(1).map((_, i) => layerPoseAt(result, i, end))];
+    this.framesReady = Math.max(1, Math.min(framesReady, result.frames));
+    this.updateWreck();
     this.layerVersion++;
+  }
+
+  /** More keyframes of an attached, streaming result are ready. */
+  extendLayers(framesReady: number): void {
+    if (!this.layers) return;
+    this.framesReady = Math.max(this.framesReady, Math.min(framesReady, this.layers.frames));
+    this.updateWreck();
+  }
+
+  private framesReady = 0;
+
+  private updateWreck(): void {
+    const r = this.layers!;
+    const end = (this.framesReady - 1) / r.hz;
+    this.wreck = [this.intactPose(0), ...this.sections.slice(1).map((_, i) => layerPoseAt(r, i, end))];
   }
 
   get layersAttached(): boolean {
     return this.layers !== null;
+  }
+
+  /** Whether every keyframe of the attached result has arrived. */
+  get layersComplete(): boolean {
+    return this.layers !== null && this.framesReady >= this.layers.frames;
   }
 
   /** Runs the layer solver synchronously. */
@@ -505,7 +529,8 @@ export class TowerCollapse {
     const { failureStart, impact, settleEnd } = this.timeline;
     if (t < failureStart) return this.sections.map((_, k) => this.intactPose(k));
     if (this.layers && t >= this.releaseTime) {
-      const after = t - this.releaseTime;
+      // Hold at the newest keyframe if a streaming solve has not caught up yet.
+      const after = Math.min(t - this.releaseTime, (this.framesReady - 1) / this.layers.hz);
       return this.sections.map((_, k) =>
         k === 0 ? this.intactPose(0) : layerPoseAt(this.layers!, k - 1, after),
       );

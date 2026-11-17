@@ -84,6 +84,51 @@ describe('floor layers', () => {
     expect(() => make(5, 'deferred').attachLayers(r)).toThrow(/does not match/);
   });
 
+  it('streams keyframes in chunks that rebuild the full result', () => {
+    const { layers, options } = tower.layerSolverInput();
+    const chunks: [number, number][] = [];
+    let copy: Float32Array | null = null;
+    const r = new LayerSolver(layers, { ...options, groundHeight: deepEndGroundHeight }).run({
+      chunkFrames: 15,
+      onFrames: (from, to, data) => {
+        copy ??= new Float32Array(data.length);
+        copy.set(data.subarray(from * layers.length * 7, to * layers.length * 7), from * layers.length * 7);
+        chunks.push([from, to]);
+      },
+    });
+    expect(chunks[0]![0]).toBe(0);
+    chunks.slice(1).forEach(([from], i) => expect(from).toBe(chunks[i]![1]));
+    expect(chunks.at(-1)![1]).toBe(r.frames);
+    expect(copy).toEqual(r.data);
+  });
+
+  it('plays a partial stream, holding at the newest keyframe until more arrive', () => {
+    const partial = make(26, 'deferred');
+    const { layers, options } = partial.layerSolverInput();
+    const r = new LayerSolver(layers, { ...options, groundHeight: deepEndGroundHeight }).run();
+    partial.attachLayers(r, 30);
+    expect(partial.layersComplete).toBe(false);
+    const held = partial.posesAt(timeline.settleEnd);
+    const atOneSecond = tower.posesAt(partial.releaseTime + 29 / r.hz);
+    held.forEach((p, k) => expect(distance(p.position, atOneSecond[k]!.position)).toBeLessThan(1e-3));
+    partial.extendLayers(r.frames);
+    expect(partial.layersComplete).toBe(true);
+    expect(partial.wreckPoses()).toEqual(tower.wreckPoses());
+  });
+
+  it('brings the pile nearly to rest by the end (no contact jitter)', () => {
+    // Some layers still creep down the seabed slope, so not all of them sleep;
+    // none should be jittering or sliding fast.
+    const { layers, options } = tower.layerSolverInput();
+    const r = new LayerSolver(layers, { ...options, groundHeight: deepEndGroundHeight }).run();
+    const end = (r.frames - 1) / r.hz;
+    for (let k = 0; k < r.layers; k++) {
+      const a = layerPoseAt(r, k, end - 0.5).position;
+      const b = layerPoseAt(r, k, end).position;
+      expect(distance(a, b) / 0.5).toBeLessThan(0.5);
+    }
+  });
+
   it('simulates all 77 floors within a bounded precompute', () => {
     const full = make(77);
     const s = full.layerStats!;

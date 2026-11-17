@@ -65,3 +65,15 @@ time.
 - The playground draws each layer as its own group (core, slabs, panels).
   At 77 layers that is roughly 230 draw calls for the tower. Merging layers
   into one instanced draw is part of Milestone 7.
+
+## Amendment: velocity pass and streaming
+
+- Contacts now get a velocity pass after the position solve (restitution 0.1
+  above a 2gh threshold, dynamic friction μ 0.8). Layers sleep only while in
+  contact and still for 1 s. This replaced the crush damping and separation
+  clamp.
+- The worker streams keyframes in 0.5 s chunks. `TowerCollapse.attachLayers`
+  takes the number of frames ready and `extendLayers` adds more; poses hold at
+  the newest ready keyframe. Play waits only for the first chunk (9–29 ms
+  measured in Node, warm). Full solve: 12 layers 0.10 s, 26 layers 0.23 s,
+  77 floors 0.70 s, 77 floors with the cheese 1.13 s.
