@@ -97,6 +97,7 @@ apps/playground       the browser playground (Vite)
 tests/e2e             Playwright suite
 benchmarks/           CPU benchmarks
 docs/                 architecture, research, decisions (ADRs), roadmap, performance, integration
+native/pole-dynamics  C++20 utility poles and overhead wires for the São Paulo game (C ABI for Unity, WebAssembly)
 ```
 
 ## Documentation
