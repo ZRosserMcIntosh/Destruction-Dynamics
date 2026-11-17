@@ -150,6 +150,11 @@ describe('budgets', () => {
     expect(b.available).toBe(5);
   });
 
+  it('gives every floor above the stump its own layer at the top preset', () => {
+    expect(QUALITY_PRESETS.cinematic.structuralLayers).toBe(85 - 8);
+    expect(QUALITY_PRESETS.dorito.layerSimulation).toBe(false);
+  });
+
   it('presets scale real budgets monotonically', () => {
     const order = QUALITY_PRESET_IDS.map((id) => QUALITY_PRESETS[id]);
     for (let i = 1; i < order.length; i++) {
@@ -158,6 +163,7 @@ describe('budgets', () => {
       expect(b.maxParticles).toBeGreaterThan(a.maxParticles);
       expect(b.maxDebrisBodies).toBeGreaterThan(a.maxDebrisBodies);
       expect(b.fluidGridSize).toBeGreaterThan(a.fluidGridSize);
+      expect(b.structuralLayers).toBeGreaterThan(a.structuralLayers);
     }
   });
 });

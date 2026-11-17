@@ -24,10 +24,19 @@ import {
   quatRotate,
   quatSlerp,
   lerpVec,
+  scale,
+  sub,
   normalize,
   smoothstep,
   vec3,
 } from '@destruction-dynamics/core';
+import {
+  type LayerBodyInit,
+  type LayerSimulationResult,
+  LayerSolver,
+  type LayerSolverOptions,
+  layerPoseAt,
+} from './layerSolver';
 
 export interface TowerSpec {
   floors: number;
@@ -108,6 +117,22 @@ export interface CollapseOptions {
   initialLeanDeg?: number;
   /** Overall tip angle at impact, degrees. */
   impactAngleDeg?: number;
+  /**
+   * From impact onward, simulate every tipping layer as its own rigid body
+   * (LayerSolver) instead of blending into an authored wreck.
+   */
+  simulateLayers?: boolean | 'deferred';
+  seaLevel?: number;
+  /** Overrides for the layer solver (testing and tuning). */
+  layerSolver?: Partial<LayerSolverOptions>;
+}
+
+export interface LayerStats {
+  layers: number;
+  joints: number;
+  jointsBroken: number;
+  settledAfter: number;
+  computeMs: number;
 }
 
 const zAxis = vec3(0, 0, 1);
@@ -126,9 +151,15 @@ export class TowerCollapse {
   private readonly impactAngle: number;
   /** θ(s) samples of the pendulum fall, s in [0, 1]. */
   private readonly fallTable: Float64Array;
-  private readonly wreck: Pose[];
+  private wreck: Pose[];
   private readonly fallEnd: Pose[];
-  private readonly bendSign: number[];
+  /** Seeded shape of the bend along the tower (amplitude and waviness). */
+  private readonly bendAmp: number;
+  private readonly bendPhase: number;
+  private layers: LayerSimulationResult | null = null;
+  private authoredWreck: Pose[];
+  /** Bumped when simulated layers are attached (views and collision rebuild). */
+  layerVersion = 0;
 
   constructor(
     readonly spec: TowerSpec,
@@ -144,9 +175,90 @@ export class TowerCollapse {
     this.impactAngle = (opts.impactAngleDeg ?? 88) * DEG;
     this.fallTable = this.solveFall();
     const rng = new SeededRandom(opts.seed);
-    this.bendSign = this.sections.map(() => rng.range(0.7, 1.3));
+    this.bendAmp = rng.range(0.75, 1.25);
+    this.bendPhase = rng.range(0, Math.PI * 2);
     this.fallEnd = this.fallPoses(1);
-    this.wreck = this.buildWreck(rng);
+    this.authoredWreck = this.buildWreck(rng);
+    this.wreck = this.authoredWreck;
+    if (opts.simulateLayers === true && this.sections.length > 1) this.attachLayers(this.simulateLayers());
+  }
+
+  /**
+   * What the layer solver needs, as plain data (it can be posted to a worker).
+   * The ground function is not included; the worker supplies its own.
+   */
+  layerSolverInput(): { layers: LayerBodyInit[]; options: Omit<LayerSolverOptions, 'groundHeight'> } {
+    const dt = 1 / 120;
+    const before = this.posesAt(this.timeline.impact - dt);
+    const layers: LayerBodyInit[] = this.sections.slice(1).map((sec, i) => {
+      const a = before[i + 1]!;
+      const b = this.fallEnd[i + 1]!;
+      const dq = quatMultiply(b.quaternion, {
+        x: -a.quaternion.x,
+        y: -a.quaternion.y,
+        z: -a.quaternion.z,
+        w: a.quaternion.w,
+      });
+      const sgn = dq.w >= 0 ? 2 / dt : -2 / dt;
+      return {
+        pose: b,
+        velocity: scale(sub(b.position, a.position), 1 / dt),
+        angularVelocity: vec3(dq.x * sgn, dq.y * sgn, dq.z * sgn),
+        halfExtents: vec3(this.halfW, sec.height / 2, this.spec.depth / 2),
+      };
+    });
+    // Thin one-floor slabs need finer substeps to stay stable.
+    const thinnest = Math.min(...this.sections.slice(1).map((sec) => sec.height));
+    return {
+      layers,
+      options: {
+        seaLevel: this.opts.seaLevel ?? 0,
+        seed: this.opts.seed ^ 0x1a7e5,
+        // The wreck must be at rest by the end of SETTLING.
+        duration: Math.max(8, this.timeline.settleEnd - this.timeline.impact),
+        substeps: thinnest < 8 ? 6 : 4,
+        ...this.opts.layerSolver,
+      },
+    };
+  }
+
+  /** Switches from the authored wreck to simulated layers (e.g. when a worker finishes). */
+  attachLayers(result: LayerSimulationResult): void {
+    if (result.layers !== this.sections.length - 1) throw new Error('layer result does not match this tower');
+    this.layers = result;
+    const end = (result.frames - 1) / result.hz;
+    this.wreck = [this.intactPose(0), ...this.sections.slice(1).map((_, i) => layerPoseAt(result, i, end))];
+    this.layerVersion++;
+  }
+
+  get layersAttached(): boolean {
+    return this.layers !== null;
+  }
+
+  /** Runs the layer solver synchronously. */
+  private simulateLayers(): LayerSimulationResult {
+    const { layers, options } = this.layerSolverInput();
+    return new LayerSolver(layers, { ...options, groundHeight: this.opts.groundHeight }).run();
+  }
+
+  /** Per-layer simulation statistics, or null when layers are authored. */
+  get layerStats(): LayerStats | null {
+    const r = this.layers;
+    if (!r) return null;
+    let broken = 0;
+    for (const t of r.jointBreakTimes) if (Number.isFinite(t)) broken++;
+    return {
+      layers: r.layers,
+      joints: r.jointBreakTimes.length,
+      jointsBroken: broken,
+      settledAfter: r.settledAfter,
+      computeMs: r.computeMs,
+    };
+  }
+
+  /** Event time after which the structure no longer moves. */
+  get settledAt(): number {
+    return this.layers ? this.timeline.impact + this.layers.settledAfter : this.timeline.settleEnd;
   }
 
   /**
@@ -229,12 +341,27 @@ export class TowerCollapse {
       composePose(translate(pivot), rotate(tip(phi))),
       translate(vec3(-this.halfW, 0, 0)),
     );
+    // Bend is defined along the tower's height (absolute angle grows with
+    // s², with a gentle seeded wave), so the shape is the same whether the
+    // tower is split into 5 layers or 77.
+    const L = this.spec.floorHeight * (this.spec.floors - this.spec.breakFloor);
+    const lag = -0.05 * Math.sin(Math.PI * p);
+    const whip = 0.08 * smoothstep(0.82, 1, p);
+    const bendAt = (sFrac: number) =>
+      (lag + whip) *
+      this.bendAmp *
+      sFrac *
+      sFrac *
+      (1 + 0.15 * Math.sin(2 * Math.PI * 1.5 * sFrac + this.bendPhase));
+    let height = 0;
+    let prevBend = 0;
     for (let k = 1; k <= n; k++) {
       if (k > 1) {
         const prev = this.sections[k - 1]!;
-        const lag = -0.05 * Math.sin(Math.PI * p);
-        const whip = 0.08 * smoothstep(0.82, 1, p);
-        const bend = ((k - 1) / Math.max(1, n - 1)) * (lag + whip) * this.bendSign[k]!;
+        height += prev.height;
+        const abs = bendAt(height / L);
+        const bend = abs - prevBend;
+        prevBend = abs;
         const hinge = vec3(bend >= 0 ? this.halfW : -this.halfW, prev.height, 0);
         pose = composePose(
           pose,
@@ -302,6 +429,12 @@ export class TowerCollapse {
     if (t < impact) {
       const p = t < tipStart ? 0 : (t - tipStart) / (impact - tipStart);
       return this.fallPoses(p, t);
+    }
+    if (this.layers) {
+      const after = t - impact;
+      return this.sections.map((_, k) =>
+        k === 0 ? this.intactPose(0) : layerPoseAt(this.layers!, k - 1, after),
+      );
     }
     // Impact into wreck: a hard slam, then a slow settle onto the seabed.
     const age = t - impact;

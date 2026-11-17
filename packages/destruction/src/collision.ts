@@ -9,10 +9,16 @@ import type { BodyHandle, PhysicsAdapter } from '@destruction-dynamics/physics';
 import type { CollapseTimeline, TowerCollapse } from './tower';
 import type { CollisionMode } from './types';
 
-export function towerCollisionModeAt(state: string, t: number, timeline: CollapseTimeline): CollisionMode {
+export function towerCollisionModeAt(
+  state: string,
+  t: number,
+  timeline: CollapseTimeline,
+  /** When the structure stops moving (simulated layers); defaults to shortly after impact. */
+  settledAt?: number,
+): CollisionMode {
   if (state === 'INTACT' || state === 'PREPARING' || state === 'RESTORATION') return 'intact';
   if (t < timeline.failureStart + 0.5 * (timeline.tipStart - timeline.failureStart)) return 'intact';
-  if (t >= timeline.impact + 2) return 'wreck';
+  if (t >= (settledAt ?? timeline.impact + 2)) return 'wreck';
   return 'kinematic';
 }
 

@@ -50,6 +50,8 @@ describe('The Deep End, headless', () => {
     expect(sim.stats().tiltDeg).toBeGreaterThan(80);
     expect(sim.stats().worldOverrides).toBeGreaterThan(0);
     expect(sim.tiles.activeTiles().length).toBeGreaterThan(0);
+    // Balanced splits the tower into 12 independently simulated layers.
+    expect(sim.stats().layers).toMatchObject({ count: 12, attached: true, status: 'ready' });
 
     // Floating props near the impact were pushed around by the water.
     expect(sim.floaters.every((f) => Number.isFinite(f.pose.position.y))).toBe(true);
@@ -73,6 +75,8 @@ describe('The Deep End, headless', () => {
     expect(sim.debris.maxBodies).toBe(40);
     expect(sim.floaters).toHaveLength(6);
     expect(sim.plan.columns).toBe(3);
+    expect(sim.tower.sections).toHaveLength(6);
+    expect(sim.stats().layers.status).toBe('authored');
   });
 
   it('saves and loads mid-event, re-creating the surge', async () => {

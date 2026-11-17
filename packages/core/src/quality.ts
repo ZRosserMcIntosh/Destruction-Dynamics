@@ -35,6 +35,13 @@ export interface QualitySettings {
   caustics: boolean;
   /** Floating props (buoys, crates, boats) simulated with buoyancy. */
   floatingObjects: number;
+  /**
+   * Structural layers the hero tower is split into above its stump. At the
+   * top preset every floor is its own layer.
+   */
+  structuralLayers: number;
+  /** From impact onward, simulate each layer as its own rigid body (else authored). */
+  layerSimulation: boolean;
 }
 
 export const QUALITY_PRESETS: Readonly<Record<QualityPresetId, QualitySettings>> = {
@@ -57,6 +64,8 @@ export const QUALITY_PRESETS: Readonly<Record<QualityPresetId, QualitySettings>>
     underwaterParticles: 150,
     caustics: false,
     floatingObjects: 6,
+    structuralLayers: 5,
+    layerSimulation: false,
   },
   balanced: {
     id: 'balanced',
@@ -77,6 +86,8 @@ export const QUALITY_PRESETS: Readonly<Record<QualityPresetId, QualitySettings>>
     underwaterParticles: 600,
     caustics: true,
     floatingObjects: 16,
+    structuralLayers: 12,
+    layerSimulation: true,
   },
   high: {
     id: 'high',
@@ -97,6 +108,8 @@ export const QUALITY_PRESETS: Readonly<Record<QualityPresetId, QualitySettings>>
     underwaterParticles: 1500,
     caustics: true,
     floatingObjects: 30,
+    structuralLayers: 26,
+    layerSimulation: true,
   },
   cinematic: {
     id: 'cinematic',
@@ -117,6 +130,8 @@ export const QUALITY_PRESETS: Readonly<Record<QualityPresetId, QualitySettings>>
     underwaterParticles: 3000,
     caustics: true,
     floatingObjects: 48,
+    structuralLayers: 77,
+    layerSimulation: true,
   },
 };
 

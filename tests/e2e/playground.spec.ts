@@ -10,6 +10,7 @@ type DDState = {
   debris: { active: number; spawned: number; limit: number };
   fluid: { grid: number; peak: number; maxDisturbance: number };
   collisionMode: string;
+  layers: { count: number; status: string; attached: boolean };
   quality: {
     id: string;
     fluidGridSize: number;
@@ -152,6 +153,7 @@ test.describe.serial('playground: The Deep End', () => {
     expect(dorito.render.shadows).toBe(false);
     expect(dorito.render.pixelRatio).toBeLessThan(balanced.render.pixelRatio);
     expect(dorito.debris.limit).toBe(40);
+    expect(dorito.layers).toMatchObject({ count: 5, status: 'authored' });
     await page.selectOption('#quality', 'high');
     await waitFor(page, "s.quality.id === 'high'", 30_000);
     const high = await state(page);
@@ -159,6 +161,9 @@ test.describe.serial('playground: The Deep End', () => {
     expect(high.render.shadows).toBe(true);
     expect(high.render.oceanGrid).toBeGreaterThan(balanced.render.oceanGrid);
     expect(high.quality.maxParticles).toBeGreaterThan(balanced.quality.maxParticles);
+    // High splits the tower into 26 layers, solved in a Web Worker.
+    expect(high.layers.count).toBe(26);
+    await waitFor(page, 's.layers.attached === true', 60_000);
   });
 
   test('10. no critical runtime errors occurred', async () => {
