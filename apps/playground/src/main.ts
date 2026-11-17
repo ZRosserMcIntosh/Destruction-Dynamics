@@ -2,6 +2,7 @@ import './style.css';
 import { AudioCueRouter, ProceduralAudioEngine } from '@destruction-dynamics/audio';
 import { QUALITY_PRESET_IDS, type QualityPresetId } from '@destruction-dynamics/core';
 import { stageWindows } from '@destruction-dynamics/events';
+import { isDeepEndVariant } from '@destruction-dynamics/scenarios';
 import { CAMERA_MODES, type CameraMode, CameraRig } from './cameras';
 import { SceneView } from './sceneView';
 import { DeepEndSimulation, type PlaygroundSave } from './simulation';
@@ -19,13 +20,32 @@ window.addEventListener('unhandledrejection', (e) => reportError(String(e.reason
 
 const params = new URLSearchParams(location.search);
 const initialQuality = (params.get('quality') as QualityPresetId) ?? 'balanced';
+const scenarioParam = params.get('scenario');
+const variantId = isDeepEndVariant(scenarioParam) ? scenarioParam : 'classic';
 
 async function start(): Promise<void> {
   const seed = Number($<HTMLInputElement>('seed').value) || 1234;
   const sim = new DeepEndSimulation(
     QUALITY_PRESET_IDS.includes(initialQuality) ? initialQuality : 'balanced',
     seed,
+    variantId,
   );
+  const scenarioSel = $<HTMLSelectElement>('scenario');
+  scenarioSel.value = variantId === 'cheese' ? 'cheese' : 'the-deep-end';
+  scenarioSel.addEventListener('change', () => {
+    // Variants change the world itself (colliders, water walls), so reload into the new one.
+    const next = new URL(location.href);
+    if (scenarioSel.value === 'cheese') next.searchParams.set('scenario', 'cheese');
+    else next.searchParams.delete('scenario');
+    next.searchParams.set('quality', sim.quality.id);
+    location.href = next.toString();
+  });
+  if (sim.variant.requestedBy) {
+    const note = document.createElement('p');
+    note.className = 'sub request';
+    note.textContent = `Viewer request from ${sim.variant.requestedBy}: "a giant block of cheese in the center forever (make it indestructible pls)"`;
+    document.querySelector('#panel header')?.appendChild(note);
+  }
   await sim.init();
   const view = new SceneView($('viewport'), sim);
   const rig = new CameraRig(view.camera, view.renderer.domElement, sim);
@@ -218,6 +238,11 @@ async function start(): Promise<void> {
       if (!scrubbing) timeline.value = String(d.state === 'INTACT' ? tMin : Math.min(tMax, d.time));
       $('timeline-label').textContent = d.state === 'INTACT' ? 'intact' : `${d.time.toFixed(1)} s`;
       pauseBtn.textContent = d.paused ? 'Resume' : 'Pause';
+      // Floors are solved in a worker; starting before they are ready would let
+      // the tower pass through obstacles, so hold Play until then.
+      const solving = sim.layerStatus === 'computing';
+      for (const id of ['btn-play', 'btn-trigger']) ($(id) as HTMLButtonElement).disabled = solving;
+      $('btn-play').textContent = solving ? 'Solving floors…' : 'Play';
       const s = sim.stats();
       const i = view.info;
       const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
@@ -245,6 +270,7 @@ async function start(): Promise<void> {
         mem
           ? `js heap ${(mem.usedJSHeapSize / 1048576).toFixed(0)} MB`
           : 'js heap n/a (browser does not expose it)',
+        `scenario ${sim.variant.title}`,
         `renderer WebGL2${webgpu ? ' (WebGPU available; not used yet)' : ''} · physics ${s.physicsBackend}`,
         ...sim.cueLog.slice(-4),
       ].join('\n');

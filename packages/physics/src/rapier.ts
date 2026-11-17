@@ -72,7 +72,10 @@ export class RapierPhysicsAdapter implements PhysicsAdapter {
     const cd =
       d.shape.type === 'box'
         ? RAPIER.ColliderDesc.cuboid(d.shape.halfExtents.x, d.shape.halfExtents.y, d.shape.halfExtents.z)
-        : RAPIER.ColliderDesc.ball(d.shape.radius);
+        : d.shape.type === 'sphere'
+          ? RAPIER.ColliderDesc.ball(d.shape.radius)
+          : RAPIER.ColliderDesc.convexHull(Float32Array.from(d.shape.points.flatMap((p) => [p.x, p.y, p.z])));
+    if (!cd) throw new Error('could not build a convex hull from the given points');
     cd.setDensity(d.density ?? 1000)
       .setFriction(d.friction ?? 0.6)
       .setRestitution(d.restitution ?? 0.1);

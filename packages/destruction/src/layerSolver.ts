@@ -23,6 +23,7 @@ import {
   quatRotate,
   vec3,
 } from '@destruction-dynamics/core';
+import { type ConvexShape, type StaticObstacle, obstacleBounds, shapeEdgePoints } from './shapes';
 
 export interface LayerBodyInit {
   /** Pose of the layer's origin (bottom centre of its box). */
@@ -48,6 +49,10 @@ export interface LayerSolverOptions {
   substeps?: number;
   /** Joint stretch (m) beyond which a slab connection breaks: [min, max], seeded per joint. */
   jointStrength?: [number, number];
+  /** Corner connection capacity, in multiples of the lighter layer's weight: [min, max], seeded. */
+  jointCapacity?: [number, number];
+  /** Immovable, indestructible convex obstacles the layers collide with. */
+  obstacles?: StaticObstacle[];
 }
 
 export interface LayerSimulationResult {
@@ -63,12 +68,23 @@ export interface LayerSimulationResult {
   readonly settledAfter: number;
   /** Wall-clock milliseconds the precompute took. */
   readonly computeMs: number;
+  /** Substeps run in total (adaptive). */
+  readonly substeps?: number;
 }
 
 const G = 9.81;
 const WATER = 1025;
 const SIGNS = [-1, 1] as const;
+
 const MAX_SPEED = 70;
+/** Penetration (m) that counts as a crushing hit, and the share of velocity kept after one. */
+const CRUSH_DEPTH = 0.05;
+const CRUSH_KEEP = 0.82;
+/** Fastest speed (m/s) at which a contact may push overlapping bodies apart. */
+const MAX_DEPENETRATION = 6;
+/** Adaptive substeps: at least this many, and a substep may move a layer at most this fraction of its thickness. */
+const MIN_SUBSTEPS = 2;
+const SUBSTEP_TRAVEL = 0.15;
 
 function normalizeQuat(q: Quat): Quat {
   const l = Math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
@@ -100,12 +116,30 @@ export class LayerSolver {
   private readonly floodRate: Float64Array;
   private readonly restTime: Float64Array;
   private readonly asleep: Uint8Array;
+  /** Set when a body was pushed out of the ground or an obstacle this substep. */
+  private readonly crushed: Uint8Array;
+  /** One contact normal per body this substep, used to cap how fast contacts separate. */
+  private readonly CN: Float64Array;
+  private readonly hasNormal: Uint8Array;
   // Per joint (4 per interface between layer k and k + 1).
   private readonly jl: Float64Array; // la xyz, lb xyz
   private readonly jStrength: Float64Array;
+  /** Force (N) at which each corner connection fails. */
+  private readonly jForce: Float64Array;
   private readonly jBroken: Uint8Array;
   private readonly jBreakTime: Float32Array;
   private time = 0;
+  /** Substeps actually run (adaptive). */
+  substepsTaken = 0;
+  /** Ground sampled once into a grid (bilinear lookups replace the scenario's function). */
+  private readonly groundGrid: {
+    x0: number;
+    z0: number;
+    step: number;
+    nx: number;
+    nz: number;
+    h: Float32Array;
+  };
   // Scratch outputs.
   private ox = 0;
   private oy = 0;
@@ -119,10 +153,14 @@ export class LayerSolver {
       stepHz: 60,
       substeps: 4,
       jointStrength: [0.06, 0.9],
+      obstacles: [],
+      jointCapacity: [1.5, 8],
       ...opts,
     };
     const n = (this.n = layers.length);
-    const f = () => new Float64Array(n);
+    // Obstacles are bodies n.. with zero inverse mass and inertia: corrections never move them.
+    const total = n + this.o.obstacles.length;
+    const f = () => new Float64Array(total);
     this.hx = f();
     this.hy = f();
     this.hz = f();
@@ -130,16 +168,19 @@ export class LayerSolver {
     this.iix = f();
     this.iiy = f();
     this.iiz = f();
-    this.X = new Float64Array(n * 3);
-    this.Q = new Float64Array(n * 4);
-    this.V = new Float64Array(n * 3);
-    this.W = new Float64Array(n * 3);
-    this.PX = new Float64Array(n * 3);
-    this.PQ = new Float64Array(n * 4);
+    this.X = new Float64Array(total * 3);
+    this.Q = new Float64Array(total * 4);
+    this.V = new Float64Array(total * 3);
+    this.W = new Float64Array(total * 3);
+    this.PX = new Float64Array(total * 3);
+    this.PQ = new Float64Array(total * 4);
     this.flood = f();
     this.floodRate = f();
     this.restTime = f();
-    this.asleep = new Uint8Array(n);
+    this.asleep = new Uint8Array(total);
+    this.crushed = new Uint8Array(total);
+    this.CN = new Float64Array(total * 3);
+    this.hasNormal = new Uint8Array(total);
     const rng = new SeededRandom(opts.seed);
     layers.forEach((l, i) => {
       const he = l.halfExtents;
@@ -161,9 +202,36 @@ export class LayerSolver {
       this.W.set([l.angularVelocity.x, l.angularVelocity.y, l.angularVelocity.z], i * 3);
       this.floodRate[i] = 1 / rng.range(2.5, 11);
     });
+    this.o.obstacles.forEach((ob, k) => {
+      const i = n + k;
+      this.X.set([ob.position.x, ob.position.y, ob.position.z], i * 3);
+      this.Q.set([ob.quaternion.x, ob.quaternion.y, ob.quaternion.z, ob.quaternion.w], i * 4);
+      this.obstacleSphere.push(obstacleBounds(ob));
+    });
+    if (this.o.obstacles.length > 0) {
+      this.layerLattice = Array.from({ length: n }, (_, i) => this.latticeSamples(i));
+      const thinnest = Math.min(...Array.from(this.hy.subarray(0, n)), ...Array.from(this.hx.subarray(0, n)));
+      this.obstacleEdges = this.o.obstacles.map((ob) =>
+        Float64Array.from(
+          shapeEdgePoints(ob.shape, Math.max(1.5, 2 * thinnest)).flatMap((p) => [p.x, p.y, p.z]),
+        ),
+      );
+      this.obstacleEdgesWorld = this.obstacleEdges.map((pts, k) => {
+        const out = new Float64Array(pts.length);
+        for (let p = 0; p < pts.length; p += 3) {
+          this.rot(n + k, pts[p]!, pts[p + 1]!, pts[p + 2]!);
+          out[p] = this.X[(n + k) * 3]! + this.ox;
+          out[p + 1] = this.X[(n + k) * 3 + 1]! + this.oy;
+          out[p + 2] = this.X[(n + k) * 3 + 2]! + this.oz;
+        }
+        return out;
+      });
+    }
+    this.groundGrid = this.sampleGround(layers);
     const joints = Math.max(0, n - 1) * 4;
     this.jl = new Float64Array(joints * 6);
     this.jStrength = new Float64Array(joints);
+    this.jForce = new Float64Array(joints);
     this.jBroken = new Uint8Array(joints);
     this.jBreakTime = new Float32Array(joints).fill(Infinity);
     const [smin, smax] = this.o.jointStrength;
@@ -175,15 +243,53 @@ export class LayerSolver {
           const cz = sz * Math.min(this.hz[k]!, this.hz[k + 1]!) * 0.92;
           this.jl.set([cx, this.hy[k]!, cz, cx, -this.hy[k + 1]!, cz], j * 6);
           this.jStrength[j] = smin + (smax - smin) * rng.next() * rng.next();
+          // Capacity as a multiple of the lighter neighbour's weight, so a joint
+          // means the same thing whether a layer is one floor or twenty.
+          const lighter = Math.min(1 / this.im[k]!, 1 / this.im[k + 1]!);
+          const [fmin, fmax] = this.o.jointCapacity;
+          this.jForce[j] = lighter * G * (fmin + (fmax - fmin) * rng.next());
           j++;
         }
   }
 
+  /** Samples the ground over everywhere the layers can reach (1 m grid). */
+  private sampleGround(layers: readonly LayerBodyInit[]) {
+    const reach =
+      150 +
+      Math.max(0, ...layers.map((l) => 2 * Math.max(l.halfExtents.x, l.halfExtents.y, l.halfExtents.z)));
+    const xs = layers.map((l) => l.pose.position.x);
+    const zs = layers.map((l) => l.pose.position.z);
+    const step = 1;
+    const x0 = Math.floor(Math.min(...xs, 0) - reach),
+      z0 = Math.floor(Math.min(...zs, 0) - reach);
+    const nx = Math.ceil(Math.max(...xs, 0) + reach - x0) + 2,
+      nz = Math.ceil(Math.max(...zs, 0) + reach - z0) + 2;
+    const h = new Float32Array(nx * nz);
+    for (let j = 0; j < nz; j++)
+      for (let i = 0; i < nx; i++) h[j * nx + i] = this.o.groundHeight(x0 + i * step, z0 + j * step);
+    return { x0, z0, step, nx, nz, h };
+  }
+
+  /** Ground height from the cached grid (falls back to the function outside it). */
+  private ground(x: number, z: number): number {
+    const g = this.groundGrid;
+    const fx = (x - g.x0) / g.step,
+      fz = (z - g.z0) / g.step;
+    if (fx < 0 || fz < 0 || fx >= g.nx - 1 || fz >= g.nz - 1) return this.o.groundHeight(x, z);
+    const i = fx | 0,
+      j = fz | 0;
+    const tx = fx - i,
+      tz = fz - j;
+    const k = j * g.nx + i;
+    const a = g.h[k]! + (g.h[k + 1]! - g.h[k]!) * tx;
+    const b = g.h[k + g.nx]! + (g.h[k + g.nx + 1]! - g.h[k + g.nx]!) * tx;
+    return a + (b - a) * tz;
+  }
+
   // -- scalar helpers (results in ox, oy, oz) --------------------------------
 
-  /** Rotate (x, y, z) by body i's quaternion (sign −1: inverse). */
-  private rot(i: number, x: number, y: number, z: number, inverse = false): void {
-    const Q = this.Q;
+  /** Rotate (x, y, z) by body i's quaternion (sign −1: inverse); `Q` may be the previous-substep array. */
+  private rot(i: number, x: number, y: number, z: number, inverse = false, Q: Float64Array = this.Q): void {
     const qx = inverse ? -Q[i * 4]! : Q[i * 4]!;
     const qy = inverse ? -Q[i * 4 + 1]! : Q[i * 4 + 1]!;
     const qz = inverse ? -Q[i * 4 + 2]! : Q[i * 4 + 2]!;
@@ -194,6 +300,33 @@ export class LayerSolver {
     this.ox = x + qw * tx + (qy * tz - qz * ty);
     this.oy = y + qw * ty + (qz * tx - qx * tz);
     this.oz = z + qw * tz + (qx * ty - qy * tx);
+  }
+
+  /** World position of body i's local point at the start of the substep (into ox, oy, oz). */
+  private prevWorld(i: number, lx: number, ly: number, lz: number): void {
+    this.rot(i, lx, ly, lz, false, this.PQ);
+    this.ox += this.PX[i * 3]!;
+    this.oy += this.PX[i * 3 + 1]!;
+    this.oz += this.PX[i * 3 + 2]!;
+  }
+
+  /**
+   * Split a penetration into the part this substep's motion created (resolved
+   * in full, so fast bodies stop at the surface) and overlap that already
+   * existed (released slowly, so it never turns into a launch).
+   */
+  private allowed(depth: number, prevDepth: number, h: number): number {
+    const old = Math.max(0, Math.min(depth, prevDepth));
+    return depth - old + Math.min(old, MAX_DEPENETRATION * h);
+  }
+
+  /** Remembers the contact normal of body i this substep (for the separation clamp). */
+  private noteNormal(i: number, nx: number, ny: number, nz: number): void {
+    if (i >= this.n) return;
+    this.CN[i * 3] = nx;
+    this.CN[i * 3 + 1] = ny;
+    this.CN[i * 3 + 2] = nz;
+    this.hasNormal[i] = 1;
   }
 
   /** World inverse inertia of body i applied to (x, y, z). */
@@ -266,12 +399,13 @@ export class LayerSolver {
     c: number,
     alpha: number,
     h: number,
-  ): void {
+  ): number {
     const wa = this.gim(a, rax, ray, raz, nx, ny, nz);
     const wb = b >= 0 ? this.gim(b, rbx, rby, rbz, nx, ny, nz) : 0;
     const dl = c / (wa + wb + alpha / (h * h));
     this.push(a, rax, ray, raz, nx * dl, ny * dl, nz * dl, 1);
     if (b >= 0) this.push(b, rbx, rby, rbz, nx * dl, ny * dl, nz * dl, -1);
+    return dl;
   }
 
   private wake(i: number): void {
@@ -364,7 +498,15 @@ export class LayerSolver {
         this.jBreakTime[j] = this.time;
         continue;
       }
-      if (c > 1e-9) this.correct(a, rax, ray, raz, b, rbx, rby, rbz, dx / c, dy / c, dz / c, c, 1e-8, h);
+      if (c <= 1e-9) continue;
+      // The multiplier over h² is the force the joint carried this substep:
+      // slab connections fail by load, not by how far a stiff joint stretched.
+      const force =
+        this.correct(a, rax, ray, raz, b, rbx, rby, rbz, dx / c, dy / c, dz / c, c, 1e-8, h) / (h * h);
+      if (force > this.jForce[j]!) {
+        this.jBroken[j] = 1;
+        this.jBreakTime[j] = this.time;
+      }
     }
 
     // Ground contact with static friction.
@@ -382,10 +524,14 @@ export class LayerSolver {
               rz = this.oz;
             const px = X[i * 3]! + rx,
               pz = X[i * 3 + 2]! + rz;
-            const g = this.o.groundHeight(px, pz);
+            const g = this.ground(px, pz);
             const depth = g - (X[i * 3 + 1]! + ry);
             if (depth <= 0) continue;
-            this.correct(i, rx, ry, rz, -1, 0, 0, 0, 0, 1, 0, depth, 0, h);
+            if (depth > CRUSH_DEPTH) this.crushed[i] = 1;
+            this.prevWorld(i, lx, ly, lz);
+            const prevDepth = this.ground(this.ox, this.oz) - this.oy;
+            this.noteNormal(i, 0, 1, 0);
+            this.correct(i, rx, ry, rz, -1, 0, 0, 0, 0, 1, 0, this.allowed(depth, prevDepth, h), 0, h);
             // Undo tangential slip of this corner during the substep (static friction).
             this.rot(i, lx, ly, lz);
             rx = this.ox;
@@ -416,16 +562,79 @@ export class LayerSolver {
         this.boxContact(i, k, h);
         this.boxContact(k, i, h);
       }
+    // Layers against obstacles, both ways: layer surface points inside the
+    // block, and the block's edges cutting through a layer.
+    for (let o = n; o < this.hx.length; o++) {
+      const local = this.obstacleEdges[o - n]!;
+      const world = this.obstacleEdgesWorld[o - n]!;
+      const sphere = this.obstacleSphere[o - n]!;
+      const shape = this.o.obstacles[o - n]!.shape;
+      for (let i = 0; i < n; i++) {
+        const lr = Math.sqrt(this.hx[i]! ** 2 + this.hy[i]! ** 2 + this.hz[i]! ** 2);
+        const bx = X[i * 3]! - sphere.center.x,
+          by = X[i * 3 + 1]! - sphere.center.y,
+          bz = X[i * 3 + 2]! - sphere.center.z;
+        if (bx * bx + by * by + bz * bz > (lr + sphere.radius) ** 2) continue;
+        // Exact early-out: the layer's sphere is entirely outside one face plane.
+        this.rot(
+          o,
+          X[i * 3]! - X[o * 3]!,
+          X[i * 3 + 1]! - X[o * 3 + 1]!,
+          X[i * 3 + 2]! - X[o * 3 + 2]!,
+          true,
+        );
+        let outside = false;
+        for (const pl of shape.planes)
+          if (pl.n.x * this.ox + pl.n.y * this.oy + pl.n.z * this.oz - pl.d > lr) {
+            outside = true;
+            break;
+          }
+        if (outside) continue;
+        const lat = this.layerLattice[i]!;
+        for (let p = 0; p < lat.length; p += 3)
+          this.convexContact(i, o, shape, lat[p]!, lat[p + 1]!, lat[p + 2]!, h);
+        // The obstacle never moves: its edge points are fixed in the world, so
+        // reject them against the layer's bounding sphere before any rotation.
+        const cx = X[i * 3]!,
+          cy = X[i * 3 + 1]!,
+          cz = X[i * 3 + 2]!;
+        const r2 = this.hx[i]! ** 2 + this.hy[i]! ** 2 + this.hz[i]! ** 2;
+        for (let p = 0; p < world.length; p += 3) {
+          const dx = world[p]! - cx,
+            dy = world[p + 1]! - cy,
+            dz = world[p + 2]! - cz;
+          if (dx * dx + dy * dy + dz * dz < r2)
+            this.pointContact(o, i, local[p]!, local[p + 1]!, local[p + 2]!, h);
+        }
+      }
+    }
 
     // Velocities from positions; sleep bodies that have stayed still.
     for (let i = 0; i < n; i++) {
       if (this.asleep[i]) continue;
-      const vx = (X[i * 3]! - PX[i * 3]!) / h,
+      let vx = (X[i * 3]! - PX[i * 3]!) / h,
         vy = (X[i * 3 + 1]! - PX[i * 3 + 1]!) / h,
         vz = (X[i * 3 + 2]! - PX[i * 3 + 2]!) / h;
+      // Contacts may stop a body, but never fling it: cap the separating speed.
+      if (this.hasNormal[i]) {
+        const cnx = this.CN[i * 3]!,
+          cny = this.CN[i * 3 + 1]!,
+          cnz = this.CN[i * 3 + 2]!;
+        const vn = vx * cnx + vy * cny + vz * cnz;
+        if (vn > MAX_DEPENETRATION) {
+          vx -= (vn - MAX_DEPENETRATION) * cnx;
+          vy -= (vn - MAX_DEPENETRATION) * cny;
+          vz -= (vn - MAX_DEPENETRATION) * cnz;
+        }
+        this.hasNormal[i] = 0;
+      }
       // Safety clamp: no structural piece outruns the fall itself.
       const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      const k = sp > MAX_SPEED ? MAX_SPEED / sp : 1;
+      // Crushing concrete absorbs energy: a hard push-out this substep may not
+      // turn into a rebound (position-based contacts otherwise conserve it).
+      const crush = this.crushed[i] ? CRUSH_KEEP : 1;
+      this.crushed[i] = 0;
+      const k = (sp > MAX_SPEED ? MAX_SPEED / sp : 1) * crush;
       V[i * 3] = vx * k;
       V[i * 3 + 1] = vy * k;
       V[i * 3 + 2] = vz * k;
@@ -443,9 +652,9 @@ export class LayerSolver {
       const dz = aw * bz + ax * by - ay * bx + az * bw;
       const dw = aw * bw - ax * bx - ay * by - az * bz;
       const s = dw >= 0 ? 2 / h : -2 / h;
-      W[i * 3] = dx * s;
-      W[i * 3 + 1] = dy * s;
-      W[i * 3 + 2] = dz * s;
+      W[i * 3] = dx * s * crush;
+      W[i * 3 + 1] = dy * s * crush;
+      W[i * 3 + 2] = dz * s * crush;
       const still = vx * vx + vy * vy + vz * vz < 0.01 && (dx * dx + dy * dy + dz * dz) * s * s < 0.002;
       this.restTime[i] = still ? this.restTime[i]! + h : 0;
       if (this.restTime[i]! > 0.6) {
@@ -463,7 +672,7 @@ export class LayerSolver {
   }
 
   /** Corners of box a inside box b are pushed out along b's shallowest axis. */
-  private boxContact(a: number, b: number, h: number): void {
+  private boxContact(a: number, b: number, h: number, samples?: Float64Array): void {
     const X = this.X;
     const dx = X[a * 3]! - X[b * 3]!,
       dy = X[a * 3 + 1]! - X[b * 3 + 1]!,
@@ -471,63 +680,230 @@ export class LayerSolver {
     const ra = Math.sqrt(this.hx[a]! ** 2 + this.hy[a]! ** 2 + this.hz[a]! ** 2);
     const rb = Math.sqrt(this.hx[b]! ** 2 + this.hy[b]! ** 2 + this.hz[b]! ** 2);
     if (dx * dx + dy * dy + dz * dz > (ra + rb) ** 2) return;
-    for (const cx of SIGNS)
-      for (const cy of SIGNS)
-        for (const cz of SIGNS) {
-          this.rot(a, cx * this.hx[a]!, cy * this.hy[a]!, cz * this.hz[a]!);
-          const rax = this.ox,
-            ray = this.oy,
-            raz = this.oz;
-          const wx = X[a * 3]! + rax,
-            wy = X[a * 3 + 1]! + ray,
-            wz = X[a * 3 + 2]! + raz;
-          this.rot(b, wx - X[b * 3]!, wy - X[b * 3 + 1]!, wz - X[b * 3 + 2]!, true);
-          const lx = this.ox,
-            ly = this.oy,
-            lz = this.oz;
-          const px = this.hx[b]! - Math.abs(lx);
-          const py = this.hy[b]! - Math.abs(ly);
-          const pz = this.hz[b]! - Math.abs(lz);
-          if (px <= 0 || py <= 0 || pz <= 0) continue;
-          let nx = 0,
-            ny = 0,
-            nz = 0,
-            depth: number;
-          if (px <= py && px <= pz) {
-            nx = Math.sign(lx) || 1;
-            depth = px;
-          } else if (py <= pz) {
-            ny = Math.sign(ly) || 1;
-            depth = py;
-          } else {
-            nz = Math.sign(lz) || 1;
-            depth = pz;
+    const pts = samples ?? this.cornerSamples(a);
+    for (let s = 0; s < pts.length; s += 3) this.pointContact(a, b, pts[s]!, pts[s + 1]!, pts[s + 2]!, h);
+  }
+
+  private readonly cornerCache = new Map<number, Float64Array>();
+  private layerLattice: Float64Array[] = [];
+  private obstacleEdges: Float64Array[] = [];
+  private obstacleEdgesWorld: Float64Array[] = [];
+  private readonly obstacleSphere: { center: Vec3; radius: number }[] = [];
+
+  private cornerSamples(i: number): Float64Array {
+    let c = this.cornerCache.get(i);
+    if (!c) {
+      const out: number[] = [];
+      for (const cx of SIGNS)
+        for (const cy of SIGNS)
+          for (const cz of SIGNS) out.push(cx * this.hx[i]!, cy * this.hy[i]!, cz * this.hz[i]!);
+      c = Float64Array.from(out);
+      this.cornerCache.set(i, c);
+    }
+    return c;
+  }
+
+  /** The 26 points of a 3×3×3 lattice on box i's surface (corners, edge midpoints, face centres). */
+  private latticeSamples(i: number): Float64Array {
+    const out: number[] = [];
+    for (const x of [-1, 0, 1])
+      for (const y of [-1, 0, 1])
+        for (const z of [-1, 0, 1])
+          if (x || y || z) out.push(x * this.hx[i]!, y * this.hy[i]!, z * this.hz[i]!);
+    return Float64Array.from(out);
+  }
+
+  /** Points along all 12 edges of box i, at most `spacing` apart. */
+  private edgeSamples(i: number, spacing: number): Float64Array {
+    const he = [this.hx[i]!, this.hy[i]!, this.hz[i]!];
+    const out: number[] = [];
+    for (let axis = 0; axis < 3; axis++) {
+      const steps = Math.max(1, Math.ceil((2 * he[axis]!) / spacing));
+      const [u, v] = [(axis + 1) % 3, (axis + 2) % 3];
+      for (const su of SIGNS)
+        for (const sv of SIGNS)
+          for (let k = 0; k <= steps; k++) {
+            const p = [0, 0, 0];
+            p[axis] = -he[axis]! + (2 * he[axis]! * k) / steps;
+            p[u] = su * he[u]!;
+            p[v] = sv * he[v]!;
+            out.push(p[0]!, p[1]!, p[2]!);
           }
-          this.rot(b, nx, ny, nz);
-          const wnx = this.ox,
-            wny = this.oy,
-            wnz = this.oz;
-          if (depth > 0.02) {
-            this.wake(a);
-            this.wake(b);
-          }
-          this.correct(
-            a,
-            rax,
-            ray,
-            raz,
-            b,
-            wx - X[b * 3]!,
-            wy - X[b * 3 + 1]!,
-            wz - X[b * 3 + 2]!,
-            wnx,
-            wny,
-            wnz,
-            depth,
-            0,
-            h,
-          );
-        }
+    }
+    return Float64Array.from(out);
+  }
+
+  /** Local point of layer i, if inside convex obstacle o, is pushed out through the nearest plane. */
+  private convexContact(
+    i: number,
+    o: number,
+    shape: ConvexShape,
+    lx: number,
+    ly: number,
+    lz: number,
+    h: number,
+  ): void {
+    const X = this.X;
+    this.rot(i, lx, ly, lz);
+    const rx = this.ox,
+      ry = this.oy,
+      rz = this.oz;
+    const wx = X[i * 3]! + rx,
+      wy = X[i * 3 + 1]! + ry,
+      wz = X[i * 3 + 2]! + rz;
+    this.rot(o, wx - X[o * 3]!, wy - X[o * 3 + 1]!, wz - X[o * 3 + 2]!, true);
+    let best = -Infinity,
+      plane = 0;
+    for (let k = 0; k < shape.planes.length; k++) {
+      const pl = shape.planes[k]!;
+      const d = pl.n.x * this.ox + pl.n.y * this.oy + pl.n.z * this.oz - pl.d;
+      if (d > best) {
+        best = d;
+        plane = k;
+      }
+      if (best >= 0) return;
+    }
+    const pl = shape.planes[plane]!;
+    const pn = pl.n;
+    // Depth of the same material point behind the same plane one substep ago.
+    this.prevWorld(i, lx, ly, lz);
+    this.rot(o, this.ox - X[o * 3]!, this.oy - X[o * 3 + 1]!, this.oz - X[o * 3 + 2]!, true);
+    const prevDepth = -(pn.x * this.ox + pn.y * this.oy + pn.z * this.oz - pl.d);
+    const depth = this.allowed(-best, prevDepth, h);
+    this.rot(o, pn.x, pn.y, pn.z);
+    const nx = this.ox,
+      ny = this.oy,
+      nz = this.oz;
+    this.noteNormal(i, nx, ny, nz);
+    if (depth > CRUSH_DEPTH) this.crushed[i] = 1;
+    if (depth > 0.02) this.wake(i);
+    this.correct(i, rx, ry, rz, -1, 0, 0, 0, nx, ny, nz, depth, 0, h);
+    this.obstacleFriction(i, o, lx, ly, lz, 0, 0, 0, nx, ny, nz, depth, h);
+  }
+
+  /** Local point (lx, ly, lz) of box a, if inside box b, is pushed out along b's shallowest axis. */
+  private pointContact(a: number, b: number, lx0: number, ly0: number, lz0: number, h: number): void {
+    const X = this.X;
+    this.rot(a, lx0, ly0, lz0);
+    const rax = this.ox,
+      ray = this.oy,
+      raz = this.oz;
+    const wx = X[a * 3]! + rax,
+      wy = X[a * 3 + 1]! + ray,
+      wz = X[a * 3 + 2]! + raz;
+    this.rot(b, wx - X[b * 3]!, wy - X[b * 3 + 1]!, wz - X[b * 3 + 2]!, true);
+    const lx = this.ox,
+      ly = this.oy,
+      lz = this.oz;
+    const px = this.hx[b]! - Math.abs(lx);
+    const py = this.hy[b]! - Math.abs(ly);
+    const pz = this.hz[b]! - Math.abs(lz);
+    if (px <= 0 || py <= 0 || pz <= 0) return;
+    let nx = 0,
+      ny = 0,
+      nz = 0,
+      depth: number;
+    if (px <= py && px <= pz) {
+      nx = Math.sign(lx) || 1;
+      depth = px;
+    } else if (py <= pz) {
+      ny = Math.sign(ly) || 1;
+      depth = py;
+    } else {
+      nz = Math.sign(lz) || 1;
+      depth = pz;
+    }
+    // Same axis, one substep ago (both bodies at their previous poses).
+    this.prevWorld(a, lx0, ly0, lz0);
+    this.rot(
+      b,
+      this.ox - this.PX[b * 3]!,
+      this.oy - this.PX[b * 3 + 1]!,
+      this.oz - this.PX[b * 3 + 2]!,
+      true,
+      this.PQ,
+    );
+    const prevDepth = nx
+      ? this.hx[b]! - nx * this.ox
+      : ny
+        ? this.hy[b]! - ny * this.oy
+        : this.hz[b]! - nz * this.oz;
+    depth = this.allowed(depth, prevDepth, h);
+    this.rot(b, nx, ny, nz);
+    const wnx = this.ox,
+      wny = this.oy,
+      wnz = this.oz;
+    this.noteNormal(a, -wnx, -wny, -wnz);
+    this.noteNormal(b, wnx, wny, wnz);
+    if (depth > 0.02) {
+      if (a < this.n) this.wake(a);
+      if (b < this.n) this.wake(b);
+    }
+    this.correct(
+      a,
+      rax,
+      ray,
+      raz,
+      b,
+      wx - X[b * 3]!,
+      wy - X[b * 3 + 1]!,
+      wz - X[b * 3 + 2]!,
+      wnx,
+      wny,
+      wnz,
+      depth,
+      0,
+      h,
+    );
+    if (a >= this.n || b >= this.n)
+      this.obstacleFriction(a, b, lx0, ly0, lz0, lx, ly, lz, wnx, wny, wnz, depth, h);
+  }
+
+  /**
+   * Friction against an obstacle: the layer's touching point may not slide
+   * along the surface while the push is strong enough (static), and slides
+   * with reduced speed otherwise (kinetic).
+   */
+  private obstacleFriction(
+    a: number,
+    b: number,
+    alx: number,
+    aly: number,
+    alz: number,
+    blx: number,
+    bly: number,
+    blz: number,
+    nx: number,
+    ny: number,
+    nz: number,
+    depth: number,
+    h: number,
+  ): void {
+    const mu = 0.9;
+    const X = this.X,
+      PX = this.PX;
+    // The layer body and its material point (local) at the contact.
+    const layer = a < this.n ? a : b;
+    const lx = layer === a ? alx : blx,
+      ly = layer === a ? aly : bly,
+      lz = layer === a ? alz : blz;
+    this.rot(layer, lx, ly, lz);
+    const rx = this.ox,
+      ry = this.oy,
+      rz = this.oz;
+    this.rot(layer, lx, ly, lz, false, this.PQ);
+    let sx = X[layer * 3]! + rx - (PX[layer * 3]! + this.ox);
+    let sy = X[layer * 3 + 1]! + ry - (PX[layer * 3 + 1]! + this.oy);
+    let sz = X[layer * 3 + 2]! + rz - (PX[layer * 3 + 2]! + this.oz);
+    const sn = sx * nx + sy * ny + sz * nz;
+    sx -= sn * nx;
+    sy -= sn * ny;
+    sz -= sn * nz;
+    const slip = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (slip < 1e-9) return;
+    const limit = mu * (depth + 0.01);
+    const undo = slip < limit ? slip : limit;
+    this.correct(layer, rx, ry, rz, -1, 0, 0, 0, -sx / slip, -sy / slip, -sz / slip, undo, 0, h);
   }
 
   /** Runs the whole simulation and returns keyframes of layer origin poses. */
@@ -538,7 +914,9 @@ export class LayerSolver {
     const frames = Math.ceil(duration * keyframeHz) + 1;
     const data = new Float32Array(frames * n * 7);
     const dt = 1 / stepHz;
-    const h = dt / substeps;
+    let thinnest = Infinity;
+    for (let i = 0; i < n; i++)
+      thinnest = Math.min(thinnest, 2 * Math.min(this.hx[i]!, this.hy[i]!, this.hz[i]!));
     let frame = 0;
     let nextKey = 1 / keyframeHz;
     let settledAfter = duration;
@@ -557,15 +935,29 @@ export class LayerSolver {
     };
     write(frame++);
     while (frame < frames) {
-      for (let s = 0; s < substeps; s++) {
-        this.substep(h);
-        this.time += h;
+      // Adaptive substeps: enough that the fastest awake layer moves at most a
+      // fraction of the thinnest slab per substep, never more than configured.
+      let vmax = 0;
+      for (let i = 0; i < n; i++)
+        if (!this.asleep[i]) {
+          const v2 = this.V[i * 3]! ** 2 + this.V[i * 3 + 1]! ** 2 + this.V[i * 3 + 2]! ** 2;
+          if (v2 > vmax) vmax = v2;
+        }
+      const sub = Math.min(
+        substeps,
+        Math.max(MIN_SUBSTEPS, Math.ceil((Math.sqrt(vmax) * dt) / (SUBSTEP_TRAVEL * thinnest))),
+      );
+      const hs = dt / sub;
+      for (let s = 0; s < sub; s++) {
+        this.substep(hs);
+        this.time += hs;
       }
+      this.substepsTaken += sub;
       while (this.time >= nextKey - 1e-9 && frame < frames) {
         write(frame++);
         nextKey += 1 / keyframeHz;
       }
-      if (this.asleep.every((a) => a === 1)) {
+      if (this.asleep.subarray(0, n).every((a) => a === 1)) {
         settledAfter = this.time;
         const last = (frame - 1) * n * 7;
         for (; frame < frames; frame++) data.copyWithin(frame * n * 7, last, last + n * 7);
@@ -580,6 +972,7 @@ export class LayerSolver {
       jointBreakTimes: this.jBreakTime,
       settledAfter,
       computeMs: performance.now() - t0,
+      substeps: this.substepsTaken,
     };
   }
 }

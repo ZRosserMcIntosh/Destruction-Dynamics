@@ -22,6 +22,7 @@ import {
   type BodyHandle,
   DEFAULT_GRAVITY,
   type PhysicsAdapter,
+  pointsBounds,
   shapeVolume,
 } from './types';
 
@@ -60,6 +61,16 @@ export class SimplePhysicsAdapter implements PhysicsAdapter {
 
   createBody(desc: BodyDesc): BodyHandle {
     const s = desc.shape;
+    // The simple backend approximates a convex hull by its bounding box (documented limitation).
+    if (s.type === 'convex') {
+      const b = pointsBounds(s.points);
+      const position = add(desc.pose.position, quatRotate(desc.pose.quaternion, b.center));
+      return this.createBody({
+        ...desc,
+        pose: { position, quaternion: desc.pose.quaternion },
+        shape: { type: 'box', halfExtents: b.halfExtents },
+      });
+    }
     const radius =
       s.type === 'sphere' ? s.radius : Math.min(s.halfExtents.x, s.halfExtents.y, s.halfExtents.z);
     const h = this.nextHandle++ as BodyHandle;
@@ -175,6 +186,7 @@ export class SimplePhysicsAdapter implements PhysicsAdapter {
   private collide(b: SimpleBody, c: SimpleBody): boolean {
     let normal: Vec3;
     let depth: number;
+    if (c.desc.shape.type === 'convex') return false; // replaced by a box at creation
     if (c.desc.shape.type === 'sphere') {
       const d = sub(b.pose.position, c.pose.position);
       const dist = length(d);

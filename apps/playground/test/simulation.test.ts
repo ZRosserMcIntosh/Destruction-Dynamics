@@ -109,4 +109,20 @@ describe('The Deep End, headless', () => {
     expect(sim.director.state).toBe('AFTERMATH');
     expect(sim.stats().tiltDeg).toBeGreaterThan(80);
   }, 120_000);
+
+  it('plays the cheese variant: the tower breaks over an indestructible block', async () => {
+    const sim = new DeepEndSimulation('dorito', 1234, 'cheese');
+    await sim.init();
+    // Even Potato simulates its 5 layers here: an authored path would pass through the cheese.
+    expect(sim.stats().layers).toMatchObject({ count: 5, attached: true });
+    expect(sim.tower.releaseTime).toBeLessThan(sim.timeline.impact);
+    expect(sim.ground(160, 0)).toBeGreaterThan(30);
+    sim.director.trigger();
+    sim.director.setTimeScale(4);
+    runUntil(sim, () => sim.director.state === 'AFTERMATH');
+    expect(sim.director.state).toBe('AFTERMATH');
+    expect(sim.collision.mode).toBe('wreck');
+    // The cheese is still exactly where it was.
+    expect(sim.variant.obstacles[0]!.position).toEqual({ x: 105, y: -28, z: 0 });
+  }, 120_000);
 });

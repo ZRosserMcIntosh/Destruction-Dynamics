@@ -125,7 +125,7 @@ export function emitMist(p: ParticleSim, r: SeededRandom, f: Footprint, count: n
     s.vy = rr.range(0, 2);
     s.vz = rr.range(-3, 3);
     s.size = rr.range(10, 22);
-    s.life = rr.range(8, 18);
+    s.life = rr.range(5, 11);
   });
 }
 
@@ -136,8 +136,8 @@ export function emitFoam(p: ParticleSim, r: SeededRandom, f: Footprint, count: n
     s.z = q.z + rr.range(-25, 25);
     s.vx = rr.range(-4, 4);
     s.vz = rr.range(-4, 4);
-    s.size = rr.range(3, 7);
-    s.life = rr.range(6, 14);
+    s.size = rr.range(2, 5);
+    s.life = rr.range(4, 9);
   });
 }
 

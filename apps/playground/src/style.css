@@ -174,3 +174,10 @@ legend {
     height: 46vh;
   }
 }
+button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.request {
+  font-style: italic;
+}

@@ -58,10 +58,14 @@ import { PROP_HALF_EXTENTS, type PropKind, ParticleSim } from '@destruction-dyna
 import {
   DEEP_END_LAYOUT,
   SEA_LEVEL,
-  deepEndDepth,
   deepEndEvent,
   deepEndGroundHeight,
   deepEndTimeline,
+  DEEP_END_VARIANTS,
+  type DeepEndVariant,
+  type DeepEndVariantId,
+  depthWithObstacles,
+  groundWithObstacles,
 } from '@destruction-dynamics/scenarios';
 import {
   type Footprint,
@@ -131,7 +135,17 @@ export class DeepEndSimulation {
   private readonly effects: SeededRandom;
   private readonly fluidCues: { time: number; params: Record<string, unknown> }[];
 
-  constructor(qualityId: QualityPresetId, seed: number | string = 'the-deep-end') {
+  readonly variant: DeepEndVariant;
+  /** Ground including indestructible obstacles (particles, cameras). */
+  readonly ground: (x: number, z: number) => number;
+
+  constructor(
+    qualityId: QualityPresetId,
+    seed: number | string = 'the-deep-end',
+    variant: DeepEndVariantId = 'classic',
+  ) {
+    this.variant = DEEP_END_VARIANTS[variant];
+    this.ground = groundWithObstacles(this.variant.obstacles);
     this.quality = qualityPreset(qualityId);
     this.governor = new BudgetGovernor({ targetFrameMs: this.quality.targetFrameMs });
     this.degradation = this.governor.current;
@@ -139,7 +153,7 @@ export class DeepEndSimulation {
     this.effects = new SeededRandom(this.director.seed ^ 0x5eed);
     this.ocean = new HybridOcean({
       waves: makeWaves('moderate', 0.35, 7),
-      depth: deepEndDepth,
+      depth: depthWithObstacles(this.variant.obstacles),
       nearField: { size: this.quality.fluidGridSize, extent: 840, centerX: 260, centerZ: 0, maxDepth: 45 },
       seaLevel: SEA_LEVEL,
     });
@@ -182,6 +196,14 @@ export class DeepEndSimulation {
 
   /** Ground, sand and seabed as static boxes following the bathymetry. */
   private buildStaticWorld(): void {
+    // Indestructible obstacles: static colliders that nothing can move or break.
+    for (const o of this.variant.obstacles)
+      this.physics.createBody({
+        kind: 'static',
+        shape: { type: 'convex', points: o.shape.vertices },
+        pose: { position: o.position, quaternion: o.quaternion },
+        friction: 0.9,
+      });
     const L = DEEP_END_LAYOUT;
     this.physics.createBody({
       kind: 'static',
@@ -207,7 +229,8 @@ export class DeepEndSimulation {
   }
 
   private buildTower(): void {
-    const layered = this.quality.layerSimulation;
+    // Obstacles need simulated layers whatever the preset: an authored path would pass through them.
+    const layered = this.quality.layerSimulation || this.variant.obstacles.length > 0;
     const useWorker = layered && typeof Worker !== 'undefined';
     this.tower = new TowerCollapse(
       { ...DEEP_END_TOWER, sections: this.quality.structuralLayers },
@@ -217,6 +240,7 @@ export class DeepEndSimulation {
         seed: this.director.seed,
         seaLevel: SEA_LEVEL,
         simulateLayers: layered ? (useWorker ? 'deferred' : true) : false,
+        obstacles: this.variant.obstacles,
       },
     );
     this.pendingLayers = null;
@@ -407,12 +431,11 @@ export class DeepEndSimulation {
         if (c.lateBy < 1) emitMist(this.particles, r, this.footprint(), n(p.count));
         break;
       case 'particles:bubbles':
-        if (c.lateBy < 1)
-          emitBubbles(this.particles, r, this.wreckCentres(), deepEndGroundHeight, n(p.count));
+        if (c.lateBy < 1) emitBubbles(this.particles, r, this.wreckCentres(), this.ground, n(p.count));
         break;
       case 'fluid:impact':
         this.ocean.applyImpact(this.impactEvent(p), Math.max(0, c.lateBy));
-        if (c.lateBy < 1) emitFoam(this.particles, r, this.footprint(), n(800));
+        if (c.lateBy < 1) emitFoam(this.particles, r, this.footprint(), n(250));
         break;
       case 'world:override':
         this.world.set(
@@ -492,7 +515,7 @@ export class DeepEndSimulation {
       this.particles.update(simDt, {
         gravity: 9.81,
         waterHeight: (x, z) => this.ocean.heightAt(x, z),
-        groundHeight: deepEndGroundHeight,
+        groundHeight: this.ground,
       });
     });
     const ms = frameMs ?? 0;
@@ -625,8 +648,7 @@ export class DeepEndSimulation {
     }
     if (t >= this.timeline.impact + 1 && t < this.timeline.settleEnd + 20) {
       const count = Math.round(120 * s * simDt);
-      if (count > 0)
-        emitBubbles(this.particles, this.effects, this.wreckCentres(), deepEndGroundHeight, count);
+      if (count > 0) emitBubbles(this.particles, this.effects, this.wreckCentres(), this.ground, count);
     }
   }
 
@@ -670,6 +692,8 @@ export class DeepEndSimulation {
       worldOverrides: tilesForBounds(this.def.bounds).flatMap((t) => this.world.forTile(t)).length,
       costs: this.profiler.costs(),
       physicsBackend: this.physics.name,
+      variant: this.variant.id,
+      releaseTime: this.tower.releaseTime,
       layers: {
         count: this.tower.sections.length - 1,
         status: this.layerStatus,

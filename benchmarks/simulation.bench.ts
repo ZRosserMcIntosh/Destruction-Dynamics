@@ -4,6 +4,7 @@
 import { QUALITY_PRESETS, SeededRandom, quatIdentity, vec3 } from '@destruction-dynamics/core';
 import {
   DEEP_END_TOWER,
+  LayerSolver,
   TowerCollapse,
   buildFacadePlan,
   towerSections,
@@ -13,6 +14,7 @@ import { HybridOcean, NearFieldSolver, computeBuoyancy, makeWaves } from '@destr
 import { RapierPhysicsAdapter } from '@destruction-dynamics/physics';
 import { ParticleSim } from '@destruction-dynamics/rendering';
 import {
+  CHEESE_OBSTACLE,
   deepEndDepth,
   deepEndEvent,
   deepEndGroundHeight,
@@ -183,4 +185,26 @@ suite('authored structure', () => {
     if (d.state === 'AFTERMATH') d.reset();
     else d.update(1 / 60);
   });
+});
+
+suite('floor-layer precompute (whole collapse, one call)', () => {
+  for (const [label, sections, obstacles] of [
+    ['12 layers', 12, []],
+    ['26 layers', 26, []],
+    ['77 floors', 77, []],
+    ['77 floors + cheese wedge', 77, [CHEESE_OBSTACLE]],
+  ] as const) {
+    const tower = new TowerCollapse({ ...DEEP_END_TOWER, sections }, deepEndTimeline(), {
+      groundHeight: deepEndGroundHeight,
+      seed: 1234,
+      simulateLayers: 'deferred',
+      obstacles: [...obstacles],
+    });
+    const { layers, options } = tower.layerSolverInput();
+    bench(
+      label,
+      () => void new LayerSolver(layers, { ...options, groundHeight: deepEndGroundHeight }).run(),
+      1,
+    );
+  }
 });
