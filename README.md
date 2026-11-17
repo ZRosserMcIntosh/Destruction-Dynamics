@@ -20,6 +20,11 @@ and settles as a wreck you can swim around.
 
 *Screenshots are from the automated Chromium run (software rendering, Balanced preset).*
 
+The second app is the **Impact Lab** (`apps/impact-lab`): drive a crash-test
+car into brick, concrete block, glass block, hay or indestructible cheese, or
+fire everyday objects (tennis ball to frozen chicken) at glass, plasterboard,
+plywood, ice and brick. Pieces break where they are hit (ADR 0010).
+
 ## Run it
 
 Requires Node 22.12 or later.
@@ -38,6 +43,7 @@ Shift to go faster.
 ```sh
 npm run build        # static site in apps/playground/dist (relative paths; host anywhere)
 npm run preview      # serve the build at http://localhost:4173
+npm run dev:impact   # Impact Lab at http://localhost:5174 (build:impact, preview:impact on 4174)
 npm test             # unit and headless integration tests (Vitest)
 npm run test:e2e     # browser end-to-end tests (Playwright, Chromium)
 npm run bench        # CPU benchmarks → benchmarks/results/latest.json
@@ -60,6 +66,7 @@ first pass at parts of Milestone 4. Each row says how far it has been verified.
 | Authored tower collapse: stump plus 5 tipping sections, an inverted-pendulum tip remapped to the timeline, inter-section lag and whip, seeded wreck on the seabed, rewind on restoration | Implemented, tested, demonstrated | `packages/destruction/test`, e2e |
 | Facade failure plan (≈1000–3400 panels, seeded, scrubbable) feeding budgeted Rapier debris, plus glass particles | Implemented, tested, demonstrated | same |
 | Floor layers by fidelity: 5 / 12 / 26 / 77 layers (one per floor at Cinematic). From impact, each layer is its own rigid body with breakable slab joints, flooding buoyancy and seabed contact, precomputed in a Web Worker | Implemented, tested, demonstrated | `packages/destruction/test/layers.test.ts`, e2e test 9, [ADR 0009](docs/DECISIONS/0009-floor-layers.md) |
+| Breakable structures: support graph with impulse damage, Voronoi shatter at the impact point, break-through momentum sharing, gravity sag over openings, a crush-model crash car with dummies, projectiles with continuous collision | Implemented, tested, demonstrated in the Impact Lab | `packages/destruction/test/fracture.test.ts`, `tests/e2e/impact.spec.ts`, [ADR 0010](docs/DECISIONS/0010-fracture-support-graph.md) |
 | Viewer challenge, Day 1: an indestructible Swiss cheese wedge (`?scenario=cheese`). Static convex obstacles, release on first contact, force-based joint failure, friction. See [LESSONS.md](docs/LESSONS.md) | Implemented, tested, demonstrated | `packages/destruction/test/obstacles.test.ts`, `tests/e2e/cheese.spec.ts` |
 | Collision states (static intact, then kinematic while falling, then static wreck), derived from event time so they survive seeks and loads | Implemented, tested | destruction tests, `apps/playground/test` |
 | Physics adapter contract with Rapier and a dependency-free fallback | Implemented, tested | `packages/physics/test/contract.test.ts` |
@@ -96,6 +103,7 @@ packages/rendering    Three.js views: ocean, sky, terrain, city, tower, debris, 
 packages/audio        AudioEngine contract, cue router, procedural WebAudio engine
 scenarios/            The Deep End: event definition (JSON) and layout
 apps/playground       the browser playground (Vite)
+apps/impact-lab       crash car and projectile gallery on the fracture module (Vite)
 tests/e2e             Playwright suite
 benchmarks/           CPU benchmarks
 docs/                 architecture, research, decisions (ADRs), roadmap, performance, integration
