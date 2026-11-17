@@ -1,0 +1,16 @@
+{
+  "name": "@destruction-dynamics/scenarios",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./index.ts",
+    "./the-deep-end/event.json": "./the-deep-end/event.json"
+  },
+  "dependencies": {
+    "@destruction-dynamics/core": "0.1.0",
+    "@destruction-dynamics/destruction": "0.1.0",
+    "@destruction-dynamics/events": "0.1.0"
+  }
+}

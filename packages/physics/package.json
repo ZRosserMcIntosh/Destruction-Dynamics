@@ -1,0 +1,14 @@
+{
+  "name": "@destruction-dynamics/physics",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@destruction-dynamics/core": "0.1.0",
+    "@dimforge/rapier3d-compat": "^0.21.0"
+  }
+}

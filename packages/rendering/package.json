@@ -1,0 +1,19 @@
+{
+  "name": "@destruction-dynamics/rendering",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@destruction-dynamics/core": "0.1.0",
+    "three": "^0.186.1",
+    "@destruction-dynamics/fluids": "0.1.0",
+    "@destruction-dynamics/destruction": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0"
+  }
+}

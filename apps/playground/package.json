@@ -1,0 +1,26 @@
+{
+  "name": "@destruction-dynamics/playground",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort"
+  },
+  "dependencies": {
+    "@destruction-dynamics/core": "0.1.0",
+    "@destruction-dynamics/events": "0.1.0",
+    "@destruction-dynamics/physics": "0.1.0",
+    "@destruction-dynamics/destruction": "0.1.0",
+    "@destruction-dynamics/fluids": "0.1.0",
+    "@destruction-dynamics/rendering": "0.1.0",
+    "@destruction-dynamics/audio": "0.1.0",
+    "three": "^0.186.1",
+    "@destruction-dynamics/scenarios": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0"
+  }
+}
