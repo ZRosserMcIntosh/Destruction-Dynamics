@@ -20,7 +20,7 @@ for (let k = 0; k < 240; ++k) {
   car.centre[0] += car.velocity[0] / 60;
 }
 const names = w.events().map((e) => e.name);
-console.log(
+console.info(
   JSON.stringify({
     sign: w.object(sign).state,
     bollard: w.object(bollard).state,
@@ -28,5 +28,5 @@ console.log(
     events: [...new Set(names)],
   }),
 );
-console.log('hash', w.hash());
+console.info('hash', w.hash());
 if (w.object(sign).state === 'INTACT') process.exit(1);

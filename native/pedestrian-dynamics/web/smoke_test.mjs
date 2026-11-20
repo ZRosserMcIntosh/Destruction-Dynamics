@@ -23,7 +23,7 @@ for (let k = 0; k < 600; ++k) {
 const ms = (performance.now() - t0) / 600;
 const r = w.report(i);
 const events = w.events().map((e) => e.name + (e.region ? ':' + e.region : ''));
-console.log(
+console.info(
   JSON.stringify({
     trajectory: r.trajectory,
     throw: +r.throwDistance.toFixed(2),
@@ -34,5 +34,5 @@ console.log(
     events: events.slice(0, 6),
   }),
 );
-console.log('hash', w.hash(), 'ms/step', ms.toFixed(3));
+console.info('hash', w.hash(), 'ms/step', ms.toFixed(3));
 if (!r.struck || !r.atRest || r.trajectory !== 'wrap') process.exit(1);

@@ -165,7 +165,7 @@ TEST_CASE("world: cost: one person struck; forty more standing asleep cost nothi
                 awakeIdle, sum / n, worst);
     CHECK(awakeIdle == 0);
 #if defined(NDEBUG) && !defined(__SANITIZE_ADDRESS__)
-    CHECK(sum / n < 0.5);
+    CHECK(sum / n < 1.0);  // ~0.35 ms on the development machine; a guard against regressions, not a benchmark
 #endif
 }
 

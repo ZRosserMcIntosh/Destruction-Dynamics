@@ -575,7 +575,8 @@ int World::step(Real dt) {
             const VehicleState& vs = veh_[static_cast<std::size_t>(v)];
             if (vs.profile < 0) continue;
             if (vs.id == p.report.vehicle) p.vehicleIndex = v;
-            if (p.awake) continue;
+            // a parked car beside someone lying still does not wake them; a moving one does
+            if (p.awake || length(vs.velocity) + length(vs.angularVelocity) < 0.05) continue;
             const VehicleProfile& prof = vehicles.at(vs.profile);
             const Vec3 centre = vs.position + rotate(vs.orientation, prof.boundCentre);
             const Real reach = prof.boundRadius + 1.2 * p.stature + length(vs.velocity) * dt;
