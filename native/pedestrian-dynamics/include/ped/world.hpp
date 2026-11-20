@@ -253,6 +253,10 @@ private:
     std::array<Vec3, kMaxVehicles> vehJ_{}, vehL_{};
     int vehCount_ = 0;
     Real stepDt_ = 1.0 / 60, time_ = 0, subTime_ = 0;
+    static constexpr int kMaxParts = 32;
+    std::array<Vec3, kMaxParts> partC_{};
+    std::array<Quat, kMaxParts> partQ_{};
+    std::array<Real, kMaxParts> partR_{};
     std::array<Event, 1024> events_{};
     int evHead_ = 0, evCount_ = 0;
     Stats stats_;

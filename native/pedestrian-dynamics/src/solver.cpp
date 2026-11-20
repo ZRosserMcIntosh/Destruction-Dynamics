@@ -16,23 +16,23 @@ namespace ped {
 
 namespace {
 
-// Signed distance from p to an oriented box (negative inside) and the outward normal there.
-// `approach` is the box's velocity relative to the point: a point inside a moving box leaves
-// through the face it came in by, not the nearest one (a fast bonnet never flips a leg out of
-// its back), as in Street Dynamics.
+// Signed distance from a point to an axis-aligned box about the origin (negative inside) and the
+// outward normal there, in the box's frame. `approach` is the box's velocity relative to the
+// point: a point inside a moving box leaves through the face it came in by, not the nearest one
+// (a fast bonnet never flips a leg out of its back), as in Street Dynamics, but only a face
+// crossed in the last moments: a part riding along with the box closes on its true face at
+// almost nothing, and a slow drift toward a far face must not win.
 constexpr Real kMaxEntryTime = 0.05;  // s
 
-Real boxDistance(const Vec3& p, const Vec3& c, const Quat& q, const Vec3& half, Vec3& normal, const Vec3& approach = {}) {
-    const Vec3 l = rotateInv(q, p - c);
+Real localBoxDistance(const Vec3& l, const Vec3& half, Vec3& normal, const Vec3& approach) {
     const Vec3 d{std::abs(l.x) - half.x, std::abs(l.y) - half.y, std::abs(l.z) - half.z};
     if (d.x > 0 || d.y > 0 || d.z > 0) {
         const Vec3 o{maxr(d.x, 0) * (l.x < 0 ? -1 : 1), maxr(d.y, 0) * (l.y < 0 ? -1 : 1), maxr(d.z, 0) * (l.z < 0 ? -1 : 1)};
         const Real len = length(o);
-        normal = rotate(q, o / len);
+        normal = o / len;
         return len;
     }
-    const Vec3 v = rotateInv(q, approach);
-    const Real vl[3] = {v.x, v.y, v.z}, ll[3] = {l.x, l.y, l.z}, dl[3] = {d.x, d.y, d.z};
+    const Real vl[3] = {approach.x, approach.y, approach.z}, ll[3] = {l.x, l.y, l.z}, dl[3] = {d.x, d.y, d.z};
     int best = -1;
     Real bestT = 1e300;
     for (int ax = 0; ax < 3; ++ax) {
@@ -40,31 +40,35 @@ Real boxDistance(const Vec3& p, const Vec3& c, const Quat& q, const Vec3& half, 
         const Real closing = vl[ax] * s;
         if (closing <= 1e-3) continue;
         const Real tEntry = -dl[ax] / closing;
-        // only a face crossed in the last moments: a part riding along with the box closes on
-        // its true face at almost nothing, and a slow drift toward a far face must not win
         if (tEntry > kMaxEntryTime) continue;
         if (tEntry < bestT) bestT = tEntry, best = ax;
     }
     if (best < 0) best = (d.x >= d.y && d.x >= d.z) ? 0 : (d.y >= d.z ? 1 : 2);
-    Vec3 nl{};
-    (best == 0 ? nl.x : best == 1 ? nl.y : nl.z) = ll[best] < 0 ? -1.0 : 1.0;
-    normal = rotate(q, nl);
+    normal = {};
+    (best == 0 ? normal.x : best == 1 ? normal.y : normal.z) = ll[best] < 0 ? -1.0 : 1.0;
     return dl[best];
 }
 
-// The point of segment a-b nearest the box (the signed distance is convex along a line, so a
-// ternary search finds its minimum).
-Real segmentBox(const Vec3& a, const Vec3& b, const Vec3& c, const Quat& q, const Vec3& half, Vec3& point, Vec3& normal,
-                const Vec3& approach) {
+// The cheap form for the search: the signed distance only.
+Real localBoxSdf(const Vec3& l, const Vec3& half) {
+    const Real dx = std::abs(l.x) - half.x, dy = std::abs(l.y) - half.y, dz = std::abs(l.z) - half.z;
+    const Real ox = maxr(dx, 0), oy = maxr(dy, 0), oz = maxr(dz, 0);
+    const Real outside = ox * ox + oy * oy + oz * oz;
+    return outside > 0 ? std::sqrt(outside) : maxr(dx, maxr(dy, dz));
+}
+
+// The point of segment a-b (box frame) nearest the box: the signed distance is convex along a
+// line, so a ternary search finds its minimum.
+Real localSegmentBox(const Vec3& a, const Vec3& b, const Vec3& half, Vec3& point, Vec3& normal, const Vec3& approach) {
     Real lo = 0, hi = 1;
-    Vec3 n;
-    for (int it = 0; it < 24; ++it) {
+    const Vec3 ab = b - a;
+    for (int it = 0; it < 22; ++it) {
         const Real m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
-        if (boxDistance(a + (b - a) * m1, c, q, half, n) <= boxDistance(a + (b - a) * m2, c, q, half, n)) hi = m2;
+        if (localBoxSdf(a + ab * m1, half) <= localBoxSdf(a + ab * m2, half)) hi = m2;
         else lo = m1;
     }
-    point = a + (b - a) * (0.5 * (lo + hi));
-    return boxDistance(point, c, q, half, normal, approach);
+    point = a + ab * (0.5 * (lo + hi));
+    return localBoxDistance(point, half, normal, approach);
 }
 
 void closestSegments(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3& q2, Real& s, Real& t) {
@@ -308,22 +312,36 @@ void World::solveVehicles(Pedestrian& p, Real h, Real tFrac) {
         Vec3 c;
         Quat q;
         vehiclePose(v, tFrac, c, q);
-        const Vec3 pel = p.body[static_cast<std::size_t>(pelvisSeg_)].x;
-        if (length(rotateInv(q, pel - c) - prof.boundCentre) > prof.boundRadius + 1.2 * p.stature) continue;
+        const Vec3 boundCentre = c + rotate(q, prof.boundCentre);
+        if (length(p.body[static_cast<std::size_t>(pelvisSeg_)].x - boundCentre) > prof.boundRadius + 1.2 * p.stature) continue;
+        // the parts' poses this substep, once for every segment
+        const int np = std::min(static_cast<int>(prof.parts.size()), kMaxParts);
+        for (int k = 0; k < np; ++k) {
+            const VehiclePart& part = prof.parts[static_cast<std::size_t>(k)];
+            partC_[static_cast<std::size_t>(k)] = c + rotate(q, part.centre);
+            partQ_[static_cast<std::size_t>(k)] = q * part.orientation;
+            partR_[static_cast<std::size_t>(k)] = length(part.half);
+        }
         for (int s = 0; s < p.count; ++s) {
             Body& b = p.body[static_cast<std::size_t>(s)];
+            const Real reachB = b.halfLength + b.radius + 0.02;
+            if (length(b.x - boundCentre) > prof.boundRadius + reachB) continue;
             Real bestDl = 0;
-            for (const VehiclePart& part : prof.parts) {
-                const Vec3 pc = c + rotate(q, part.centre);
-                const Quat pq = q * part.orientation;
-                Vec3 n;
-                if (boxDistance(b.x, pc, pq, part.half, n) > b.halfLength + b.radius + 0.02) continue;
-                const Vec3 A = b.x + rotate(b.q, b.la), B = b.x + rotate(b.q, b.lb);
+            for (int k = 0; k < np; ++k) {
+                const VehiclePart& part = prof.parts[static_cast<std::size_t>(k)];
+                const Vec3& pc = partC_[static_cast<std::size_t>(k)];
+                if (length(b.x - pc) > partR_[static_cast<std::size_t>(k)] + reachB) continue;
+                const Quat& pq = partQ_[static_cast<std::size_t>(k)];
+                const Vec3 lc = rotateInv(pq, b.x - pc);
+                if (localBoxSdf(lc, part.half) > reachB) continue;
+                const Vec3 axisL = rotateInv(pq, rotate(b.q, b.lb - b.la)) * 0.5;
                 const Vec3 surfV = vs.velocity + cross(vs.angularVelocity, b.x - c);
-                Vec3 pt;
-                const Real dist = segmentBox(A, B, pc, pq, part.half, pt, n, surfV - b.v);
+                Vec3 ptL, nL;
+                const Real dist = localSegmentBox(lc - axisL, lc + axisL, part.half, ptL, nL, rotateInv(pq, surfV - b.v));
                 const Real depth = b.radius - dist;
                 if (depth <= 0) continue;
+                const Vec3 n = rotate(pq, nL);
+                const Vec3 pt = pc + rotate(pq, ptL);
                 const Vec3 cp = pt - n * b.radius;
                 const Vec3 ra = cp - b.x;
                 const Vec3 lr = rotateInv(b.q, ra);

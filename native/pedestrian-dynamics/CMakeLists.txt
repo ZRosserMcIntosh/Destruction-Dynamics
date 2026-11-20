@@ -41,6 +41,11 @@ target_include_directories(ped_core PUBLIC include)
 target_compile_options(ped_core PRIVATE ${PED_WARNINGS} PUBLIC ${PED_FP_FLAGS})
 target_compile_definitions(ped_core PUBLIC PED_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
+add_library(PedestrianDynamics SHARED src/c_api.cpp)
+target_link_libraries(PedestrianDynamics PRIVATE ped_core)
+target_compile_options(PedestrianDynamics PRIVATE ${PED_WARNINGS})
+set_target_properties(PedestrianDynamics PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
 if(PED_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
