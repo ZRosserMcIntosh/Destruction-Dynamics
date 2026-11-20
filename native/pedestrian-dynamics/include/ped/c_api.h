@@ -96,6 +96,8 @@ PED_EXPORT void ped_vehicle_impulse(void* world, int32_t vehicle_index, double* 
  * Returns floats written (negative: capacity too small). */
 PED_EXPORT int32_t ped_parts(void* world, int32_t index, float* out, int32_t capacity);
 PED_EXPORT int32_t ped_report(void* world, int32_t index, PedReport* out);
+/* A segment's centre-of-mass velocity (m/s, world) into out3; 0 if there is no such segment. */
+PED_EXPORT int32_t ped_segment_velocity(void* world, int32_t index, int32_t segment, double* out3);
 PED_EXPORT int32_t ped_poll_events(void* world, PedEvent* out, int32_t capacity);
 PED_EXPORT void ped_stats(void* world, PedStats* out);
 PED_EXPORT uint64_t ped_state_hash(void* world);

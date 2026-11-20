@@ -110,6 +110,12 @@ PED_EXPORT int32_t ped_report(void* w, int32_t i, PedReport* out) {
     out->rest_x = r.restPosition.x, out->rest_y = r.restPosition.y, out->rest_z = r.restPosition.z;
     return 1;
 }
+PED_EXPORT int32_t ped_segment_velocity(void* w, int32_t i, int32_t s, double* out3) {
+    if (!valid(w, i) || s < 0 || s >= W(w)->segmentCount() || !out3) return 0;
+    const Vec3 v = W(w)->segmentVelocity(i, s);
+    out3[0] = v.x, out3[1] = v.y, out3[2] = v.z;
+    return 1;
+}
 PED_EXPORT int32_t ped_poll_events(void* w, PedEvent* out, int32_t capacity) {
     Event buf[64];
     int32_t total = 0;
