@@ -63,18 +63,25 @@ struct Report {
     Vec3 restPosition;                  // pelvis at rest
     Real throwDistance = 0;             // horizontal, origin to rest (m)
     // head
-    int headRegion = -1;                // Region of the first head contact with the vehicle
-    Real headImpactSpeed = 0;           // normal closing speed there (m/s)
+    int headRegion = -1;                // Region of the head's hardest strike on the vehicle
+    Real headImpactSpeed = 0;           // its normal closing speed (m/s)
     Real headImpactTime = 0;            // after first contact (s)
     Vec3 headImpactPoint;               // vehicle frame
     Real groundHeadSpeed = 0;           // the head's hardest strike on the ground (m/s)
-    Real hic15 = 0, headPeakG = 0;
-    Real hicT1 = 0, hicT2 = 0;          // the HIC window (world time)
-    // legs (0 left, 1 right)
+    Real hic15 = 0, headPeakG = 0;      // over the whole event
+    Real hicT1 = 0, hicT2 = 0;          // its window (world time)
+    Real hicVehicle = 0;                // windows ending while on the vehicle (the car's part)
+    Real hicGround = 0;                 // windows ending after (the fall)
+    Real groundHeadPeakG = 0;
+    // legs (0 left, 1 right), in the bumper phase (the first 80 ms, as a legform test measures)
     Real tibiaPeakG[2] = {0, 0};
     Real kneeBendPeakDeg[2] = {0, 0};   // lateral bending (varus/valgus) of the knee
     std::uint32_t torn = 0;             // bit per segment whose joint tore
     // kinematics
+    Real pelvisHeightAtImpact = 0;      // above the ground, at first contact
+    Real bleHeight = 0;                 // the striking vehicle's bonnet leading edge
+    bool vehiclePhase = false;          // still riding / touching the vehicle
+    Real lastVehicleContact = 0;        // world time
     Real maxPelvisHeight = 0;           // above the ground
     Real carryTime = 0;                 // in contact with the vehicle (s)
     Real airTime = 0;                   // touching nothing (s)
@@ -221,7 +228,7 @@ private:
     void solveJoints(Pedestrian& p, Real h, bool drives);
     void solveGround(Pedestrian& p, Real h);
     void solveVehicles(Pedestrian& p, Real h, Real tFrac);
-    void solveSelf(Pedestrian& p);
+    void solveSelf(Pedestrian& p, Real h);
     void finishSubstep(Pedestrian& p, Real h);
     void vehiclePose(int v, Real tFrac, Vec3& c, Quat& q) const;
     void wake(Pedestrian& p);

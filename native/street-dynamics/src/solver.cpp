@@ -42,6 +42,8 @@ Quat addRotation(const Quat& q, const Vec3& v) {
 // `approach` (optional) is the box's velocity relative to the point: a point inside a moving box
 // leaves through the face it came in by (the one that reached it soonest), not the nearest one,
 // so a fast box never flips a post over its top or out of its back.
+constexpr Real kMaxEntryTime = 0.05;  // s
+
 Real boxDistance(const Vec3& p, const Vec3& c, const Quat& q, const Vec3& half, Vec3& normal, const Vec3& approach = {}) {
     const Vec3 l = rotateInv(q, p - c);
     const Vec3 d{std::abs(l.x) - half.x, std::abs(l.y) - half.y, std::abs(l.z) - half.z};
@@ -61,7 +63,10 @@ Real boxDistance(const Vec3& p, const Vec3& c, const Quat& q, const Vec3& half, 
         const Real s = ll[ax] < 0 ? -1.0 : 1.0;
         const Real closing = vl[ax] * s;
         if (closing <= 1e-3) continue;
-        const Real tEntry = -dl[ax] / closing;  // how long ago that face passed the point
+        const Real tEntry = -dl[ax] / closing;
+        // only a face crossed in the last moments: a part riding along with the box closes on
+        // its true face at almost nothing, and a slow drift toward a far face must not win
+        if (tEntry > kMaxEntryTime) continue;  // how long ago that face passed the point
         if (tEntry < bestT) bestT = tEntry, best = ax;
     }
     if (best >= 0) {

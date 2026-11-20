@@ -1,4 +1,4 @@
-set(PED_TEST_SOURCES test_main.cpp test_body.cpp test_motion.cpp)
+set(PED_TEST_SOURCES test_main.cpp test_body.cpp test_motion.cpp test_impact.cpp)
 add_executable(ped_tests ${PED_TEST_SOURCES})
 target_link_libraries(ped_tests PRIVATE ped_core)
 target_compile_options(ped_tests PRIVATE ${PED_WARNINGS})

@@ -20,6 +20,8 @@ namespace {
 // `approach` is the box's velocity relative to the point: a point inside a moving box leaves
 // through the face it came in by, not the nearest one (a fast bonnet never flips a leg out of
 // its back), as in Street Dynamics.
+constexpr Real kMaxEntryTime = 0.05;  // s
+
 Real boxDistance(const Vec3& p, const Vec3& c, const Quat& q, const Vec3& half, Vec3& normal, const Vec3& approach = {}) {
     const Vec3 l = rotateInv(q, p - c);
     const Vec3 d{std::abs(l.x) - half.x, std::abs(l.y) - half.y, std::abs(l.z) - half.z};
@@ -38,6 +40,9 @@ Real boxDistance(const Vec3& p, const Vec3& c, const Quat& q, const Vec3& half, 
         const Real closing = vl[ax] * s;
         if (closing <= 1e-3) continue;
         const Real tEntry = -dl[ax] / closing;
+        // only a face crossed in the last moments: a part riding along with the box closes on
+        // its true face at almost nothing, and a slow drift toward a far face must not win
+        if (tEntry > kMaxEntryTime) continue;
         if (tEntry < bestT) bestT = tEntry, best = ax;
     }
     if (best < 0) best = (d.x >= d.y && d.x >= d.z) ? 0 : (d.y >= d.z ? 1 : 2);
@@ -74,6 +79,18 @@ void closestSegments(const Vec3& p1, const Vec3& q1, const Vec3& p2, const Vec3&
     t = (b * s + f) / e;
     if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); }
     else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+}
+
+// The damping term of a contact (XPBD 2016's gamma). A damper in parallel with the spring
+// (Kelvin-Voigt) pushes back c v the instant two bodies touch: a head reaching the asphalt at
+// 5 m/s would take a 400 g jolt in the first millisecond. Hunt and Crossley (1975) make the
+// damping grow with the penetration, so the force starts at zero; here it ramps in over the
+// penetration an undamped impact at this closing speed would reach.
+Real contactGamma(Real alpha, Real w, Real zeta, Real depth, Real closingSpeed, Real h) {
+    const Real k = 1.0 / alpha;
+    const Real beta = 2.0 * zeta * std::sqrt(k / w);
+    const Real reach = std::max(closingSpeed, 0.2) * std::sqrt(1.0 / (w * k));
+    return alpha * beta * std::min(1.0, depth / reach) / h;
 }
 
 bool upperSurface(Region r) {
@@ -235,8 +252,7 @@ void World::solveGround(Pedestrian& p, Real h) {
             // the body's tissue on the (rigid) pavement, damped
             const Real w = genInvMass(b, ra, up);
             const Real alpha = b.tissueCompliance;
-            const Real beta = 2.0 * groundDamping * std::sqrt(1.0 / (alpha * w));
-            const Real gamma = alpha * beta / h;
+            const Real gamma = contactGamma(alpha, w, groundDamping, depth, approach / h, h);
             if (s == headSeg_ && !b.wasGrounded && approach / h > 2.0 && p.report.struck) {
                 p.report.groundHeadSpeed = std::max(p.report.groundHeadSpeed, approach / h);
                 emit(EventType::HeadImpact, p, s, static_cast<int>(Region::Ground), c, approach / h);
@@ -271,7 +287,11 @@ void World::markStruck(Pedestrian& p, int vehicle, Real speed, int segment, int 
     r.firstContactTime = subTime_;
     r.impactSpeed = speed;
     r.throwOrigin = p.body[static_cast<std::size_t>(pelvisSeg_)].x;
-    r.maxPelvisHeight = r.throwOrigin.z - p.groundZ;
+    r.maxPelvisHeight = r.pelvisHeightAtImpact = r.throwOrigin.z - p.groundZ;
+    r.vehiclePhase = true;
+    r.lastVehicleContact = subTime_;
+    const int prof = veh_[static_cast<std::size_t>(vehicle)].profile;
+    r.bleHeight = prof >= 0 ? vehicles.at(prof).bleHeight : 0;
     p.vehicleIndex = vehicle;
     emit(EventType::VehicleContact, p, segment, region, at, speed);
     if (speed > limpOnContactSpeed) {
@@ -315,13 +335,12 @@ void World::solveVehicles(Pedestrian& p, Real h, Real tFrac) {
                 // tissue in series with the panel, damped by the panel's ratio
                 const Real w = genInvMass(b, ra, n);
                 const Real alpha = b.tissueCompliance + 1.0 / part.stiffness;
-                const Real beta = 2.0 * part.damping * std::sqrt(1.0 / (alpha * w));
-                const Real gamma = alpha * beta / h;
+                const Real gamma = contactGamma(alpha, w, part.damping, depth, std::max(closing, approach / h), h);
                 const Region region = part.region;
                 if (!p.report.struck && closing > 0.3) markStruck(p, v, closing, s, static_cast<int>(region), cp);
                 if (s == headSeg_ && b.wasVehicleRegion < 0 && b.vehicleRegion < 0 && closing > 1.0) {
                     emit(EventType::HeadImpact, p, s, static_cast<int>(region), cp, closing);
-                    if (p.report.struck && p.report.headRegion < 0) {
+                    if (p.report.struck && closing > p.report.headImpactSpeed) {  // the hardest strike
                         p.report.headRegion = static_cast<int>(region);
                         p.report.headImpactSpeed = closing;
                         p.report.headImpactTime = subTime_ - p.report.firstContactTime;
@@ -353,7 +372,7 @@ void World::solveVehicles(Pedestrian& p, Real h, Real tFrac) {
     }
 }
 
-void World::solveSelf(Pedestrian& p) {
+void World::solveSelf(Pedestrian& p, Real h) {
     for (int k = 0; k < p.pairCount; ++k) {
         Body& a = p.body[p.pairs[static_cast<std::size_t>(k)][0]];
         Body& b = p.body[p.pairs[static_cast<std::size_t>(k)][1]];
@@ -366,10 +385,29 @@ void World::solveSelf(Pedestrian& p) {
         const Vec3 pa = A0 + (A1 - A0) * s, pb = B0 + (B1 - B0) * t;
         const Vec3 d = pa - pb;
         const Real dist = length(d);
-        const Real overlap = a.radius + b.radius - dist;
-        if (overlap <= 0 || dist < 1e-9) continue;
-        const Vec3 n = d / dist;
-        applyPositional(&a, &b, (pa - n * a.radius) - a.x, (pb + n * b.radius) - b.x, n * overlap, 0, 0, 0);
+        Real overlap = a.radius + b.radius - dist;
+        if (overlap <= 0) continue;
+        // Two limbs crossing fast can carry one axis past the other's in a substep; the nearest
+        // way out is then the far side, and pushing that way would pass the foot through the
+        // shank. A deep pair is pushed back the way it came instead (as the vehicle contacts are).
+        const Vec3 rel = (a.x - a.xPrev) - (b.x - b.xPrev);
+        Vec3 n = dist > 1e-9 ? d / dist : normalized(rel * -1.0);
+        if (length(n) < 0.5) continue;
+        if (dist < 0.5 * (a.radius + b.radius) && dot(n, rel) > 0) {
+            const Vec3 back = normalized(rel * -1.0), axis = B1 - B0;
+            n = normalized(back - axis * (dot(back, axis) / std::max(dot(axis, axis), 1e-12)));
+            if (length(n) < 0.5) continue;
+            overlap = a.radius + b.radius - dot(d, n);
+        }
+        // tissue on tissue (a flailing arm against the head is soft, not a steel bar)
+        const Vec3 ra = (pa - n * a.radius) - a.x, rb = (pb + n * b.radius) - b.x;
+        const Vec3 la = rotateInv(a.q, ra), lb = rotateInv(b.q, rb);
+        const Vec3 wasA = a.xPrev + rotate(a.qPrev, la), wasB = b.xPrev + rotate(b.qPrev, lb);
+        const Real approach = dot(((a.x + ra) - wasA) - ((b.x + rb) - wasB), n * -1.0);
+        const Real w = genInvMass(a, ra, n) + genInvMass(b, rb, n);
+        const Real alpha = a.tissueCompliance + b.tissueCompliance;
+        const Real gamma = contactGamma(alpha, w, groundDamping, overlap, approach / h, h);
+        applyPositional(&a, &b, ra, rb, n * overlap, alpha / (h * h), gamma, approach);
     }
 }
 
@@ -417,6 +455,7 @@ void World::finishSubstep(Pedestrian& p, Real h) {
             const Body& hd = p.body[static_cast<std::size_t>(headSeg_)];
             const Real a = length((hd.v - hd.vLast) / h - g) / kGravity;
             r.headPeakG = std::max(r.headPeakG, a);
+            if (!r.vehiclePhase) r.groundHeadPeakG = std::max(r.groundHeadPeakG, a);
             p.hicCum += a * h;
             const int idx = (p.hicHead + p.hicCount) % kHicSamples;
             p.hicT[static_cast<std::size_t>(idx)] = subTime_;
@@ -437,10 +476,12 @@ void World::finishSubstep(Pedestrian& p, Real h) {
                     r.hicT1 = p.hicT[static_cast<std::size_t>(i0)];
                     r.hicT2 = subTime_;
                 }
+                if (r.vehiclePhase) r.hicVehicle = std::max(r.hicVehicle, hic);
+                else r.hicGround = std::max(r.hicGround, hic);
             }
         }
-        // the legs: upper-tibia acceleration and the knee's lateral bending
-        for (int side = 0; side < 2; ++side) {
+        // the legs: upper-tibia acceleration and the knee's lateral bending, in the bumper phase
+        for (int side = 0; side < 2 && subTime_ - r.firstContactTime < 0.08; ++side) {
             const int sh = shankSeg_[side];
             if (sh < 0) continue;
             const Body& b = p.body[static_cast<std::size_t>(sh)];
@@ -458,7 +499,8 @@ void World::finishSubstep(Pedestrian& p, Real h) {
             touching = touching || b.grounded || b.vehicleRegion >= 0;
             onVehicle = onVehicle || b.vehicleRegion >= 0;
         }
-        if (onVehicle) r.carryTime += h;
+        if (onVehicle) r.carryTime += h, r.lastVehicleContact = subTime_;
+        else if (r.vehiclePhase && subTime_ - r.lastVehicleContact > 0.2) r.vehiclePhase = false;
         if (!touching) {
             if (!p.airborne) p.airborne = true, p.airborneSince = subTime_;
             r.airTime += h;
@@ -496,7 +538,10 @@ void World::classify(Pedestrian& p) {
     if (!r.struck) r.trajectory = Trajectory::None;
     else if (r.overRoof) r.trajectory = Trajectory::RoofVault;
     else if (r.offSide) r.trajectory = Trajectory::FenderVault;
-    else if (r.onTop) r.trajectory = Trajectory::Wrap;
+    // Ravani et al. (1981): wrap when the front strikes below the person's centre of mass and the
+    // upper body folds onto the bonnet; forward projection when the front reaches the centre of
+    // mass (an SUV, a van, or a child in front of a car) and pushes the person ahead
+    else if (r.onTop || (r.headOnUpperSurface && r.pelvisHeightAtImpact > r.bleHeight)) r.trajectory = Trajectory::Wrap;
     else r.trajectory = Trajectory::ForwardProjection;
 }
 
@@ -542,7 +587,7 @@ int World::step(Real dt) {
             predict(p, h);
             solveJoints(p, h, true);
             solveVehicles(p, h, tFrac);
-            solveSelf(p);
+            solveSelf(p, h);
             solveJoints(p, h, true);
             solveGround(p, h);
             finishSubstep(p, h);
