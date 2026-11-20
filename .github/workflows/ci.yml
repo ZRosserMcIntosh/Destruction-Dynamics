@@ -73,3 +73,12 @@ jobs:
           name: benchmark-results
           path: benchmarks/results
           retention-days: 30
+
+  street-dynamics:
+    name: Street Dynamics (native, Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S native/street-dynamics -B native/street-dynamics/build -DCMAKE_BUILD_TYPE=Release -DSD_WARNINGS_AS_ERRORS=ON
+      - run: cmake --build native/street-dynamics/build -j
+      - run: ./native/street-dynamics/build/tests/sd_tests
