@@ -158,6 +158,9 @@ public:
     Real jointDamping = 30;       // 1/s: relative spin across a joint decays at this rate (structural damping)
     Real sleepSpeed = 0.03;       // m/s
     Real sleepTime = 0.5;         // s
+    // Patch 2026-11: a part struck through applyImpact leaves no faster than this (m/s; 0: no limit).
+    // The host sets it to ~1.3 x the striker's speed: what a light part can reach off a heavy one.
+    Real impactSpeedCap = 0;
 
 private:
     struct Body {

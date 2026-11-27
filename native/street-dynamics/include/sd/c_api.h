@@ -20,7 +20,8 @@
 
 #include <stdint.h>
 
-#if defined(_WIN32)
+#if defined(SD_EXPORT)
+#elif defined(_WIN32)
 #define SD_EXPORT __declspec(dllexport)
 #else
 #define SD_EXPORT __attribute__((visibility("default")))
