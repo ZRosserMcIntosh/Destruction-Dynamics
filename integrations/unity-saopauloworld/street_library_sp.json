@@ -1,0 +1,428 @@
+{
+ "about": "Street Dynamics object library. Units SI (m, kg, N, Pa, rad). Sources and estimates per entry; docs/README.md lists them.",
+ "materials": {
+  "steel_tube_galv": {
+   "youngs": 205000000000.0,
+   "yield": 250000000.0,
+   "density": 7850,
+   "hinge_ductility": 1.6,
+   "source": "Galvanised conduit tube (ABNT NBR 5580) has no specified yield; 200-250 MPa assumed (cf. NBR 5590 / ASTM A53 Gr. B, 240 MPa). Hinge ductility estimated (a tube folds flat before it tears)."
+  },
+  "steel_s235": {
+   "youngs": 205000000000.0,
+   "yield": 235000000.0,
+   "density": 7850,
+   "hinge_ductility": 1.6,
+   "source": "Structural steel S235 / ASTM A36-class; bike racks and steel bollards."
+  },
+  "cast_iron_grey": {
+   "youngs": 100000000000.0,
+   "yield": 250000000.0,
+   "density": 7200,
+   "brittle": true,
+   "residual": 0,
+   "hinge_ductility": 0.012,
+   "source": "Grey cast iron: tensile 150-250 MPa, modulus of rupture in bending higher; 250 MPa taken. Brittle: snaps."
+  },
+  "concrete_precast": {
+   "youngs": 30000000000.0,
+   "yield": 4500000.0,
+   "density": 2400,
+   "brittle": true,
+   "residual": 0.15,
+   "hinge_ductility": 0.05,
+   "source": "C30 precast: flexural tensile (modulus of rupture) ~4.5 MPa (EN 1992 f_ctm 2.9 MPa x size effect); light reinforcement keeps ~15 % (estimated)."
+  },
+  "wood_green_tipuana": {
+   "youngs": 4640000000.0,
+   "yield": 23250000.0,
+   "density": 900,
+   "hinge_ductility": 0.08,
+   "residual": 0.06,
+   "source": "Living tipuana trunk wood, the only strength measured on S\u00e3o Paulo street trees (Brazolin et al., redalyc 74431543002): MOR 62 MPa, MOE 4.64 GPa; x0.75 knot factor = 46.5 MPa. Green density 900 kg/m3, ductility 0.08 rad and residual 6 % (green wood splinters and hangs on by a few fibres) are estimates tuned so a 15 cm trunk costs a 1,650 kg car about what Mak et al.'s pole fracture energy scaled by circumference^4.38 implies. Marked brittle so the hinge fails at the rupture moment MOR x pi d^3/32 (MOR is defined on the elastic section), not at a plastic moment 1.7x higher. 2026-11-26: Rosser asked for trees to resist half as much as they did; yield halved to 23.25 MPa and root-plate moments halved (tuning factor 0.5, not a measured value).",
+   "brittle": true
+  }
+ },
+ "types": {
+  "stop_sign_r1": {
+   "name": "Stop sign (R-1 PARE)",
+   "family": "sign",
+   "height": 2.75,
+   "segments": 7,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.0635,
+    "t": 0.00265
+   },
+   "material": "steel_tube_galv",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 200000.0,
+    "footing_yield": 6000,
+    "footing_fail": 0.5
+   },
+   "panels": [
+    {
+     "shape": "octagon",
+     "width": 0.604,
+     "thickness": 0.00125,
+     "density": 7850,
+     "centre": 2.402,
+     "offset": 0.045,
+     "clamp": 3500,
+     "legend": "PARE"
+    }
+   ],
+   "source": "CONTRAN MBST Vol. I: R-1 urban side >= 0.25 m (0.604 m across the flats); bottom edge >= 2.10 m (MBST Vol. III; CET-SP 2.10-2.30 m). Plate 1.25 mm galvanised steel (NBR 11904). Post 2 1/2 in x 2.65 mm (Detran-PR spec). Footing 0.30 x 0.30 x 0.60 m concrete; its rotation in soil under a sidewalk slab estimated."
+  },
+  "regulatory_r19": {
+   "name": "Speed limit (R-19)",
+   "family": "sign",
+   "height": 2.6,
+   "segments": 7,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.0635,
+    "t": 0.00265
+   },
+   "material": "steel_tube_galv",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 200000.0,
+    "footing_yield": 6000,
+    "footing_fail": 0.5
+   },
+   "panels": [
+    {
+     "shape": "circle",
+     "width": 0.5,
+     "thickness": 0.00125,
+     "density": 7850,
+     "centre": 2.35,
+     "offset": 0.045,
+     "clamp": 3500,
+     "legend": "40"
+    }
+   ],
+   "source": "MBST Vol. I: circular regulatory signs >= 0.40 m urban; 0.50 m taken. Post and footing as the R-1."
+  },
+  "warning_diamond": {
+   "name": "Warning sign (diamond)",
+   "family": "sign",
+   "height": 2.85,
+   "segments": 7,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.0635,
+    "t": 0.00265
+   },
+   "material": "steel_tube_galv",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 200000.0,
+    "footing_yield": 6000,
+    "footing_fail": 0.5
+   },
+   "panels": [
+    {
+     "shape": "diamond",
+     "width": 0.71,
+     "thickness": 0.00125,
+     "density": 7850,
+     "centre": 2.455,
+     "offset": 0.045,
+     "clamp": 3500,
+     "legend": "!"
+    }
+   ],
+   "source": "Warning signs: 0.50 m side (0.71 m across the corners), estimated for urban streets. Post and footing as the R-1."
+  },
+  "street_name_double": {
+   "name": "Street-name plates (two)",
+   "family": "sign",
+   "height": 3.0,
+   "segments": 8,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.0761,
+    "t": 0.00335
+   },
+   "material": "steel_tube_galv",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 300000.0,
+    "footing_yield": 9000,
+    "footing_fail": 0.5
+   },
+   "panels": [
+    {
+     "shape": "rect",
+     "width": 0.8,
+     "height": 0.4,
+     "thickness": 0.00125,
+     "density": 7850,
+     "centre": 2.78,
+     "offset": 0.0,
+     "yaw_deg": 0,
+     "clamp": 2500,
+     "legend": "Rua A"
+    },
+    {
+     "shape": "rect",
+     "width": 0.8,
+     "height": 0.4,
+     "thickness": 0.00125,
+     "density": 7850,
+     "centre": 2.33,
+     "offset": 0.0,
+     "yaw_deg": 90,
+     "clamp": 2500,
+     "legend": "Rua B"
+    }
+   ],
+   "source": "CET-SP street-name plates 80 x 40 cm (also 64 x 30 cm); post DN65 76.1 x 3.35 mm (NBR 5580 class L)."
+  },
+  "sign_slip_base": {
+   "name": "Sign on a breakaway slip base",
+   "family": "sign",
+   "height": 2.75,
+   "segments": 7,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.0761,
+    "t": 0.00335
+   },
+   "material": "steel_tube_galv",
+   "base": {
+    "kind": "slip_base",
+    "release": 12000
+   },
+   "panels": [
+    {
+     "shape": "rect",
+     "width": 0.9,
+     "height": 0.6,
+     "thickness": 0.00125,
+     "density": 7850,
+     "centre": 2.4,
+     "offset": 0.05,
+     "clamp": 4000,
+     "legend": "SP"
+    }
+   ],
+   "source": "A breakaway support for comparison (not common on S\u00e3o Paulo streets). Release shear estimated; MASH stub limit 102 mm."
+  },
+  "bollard_cast_iron": {
+   "name": "Cast-iron bollard (frade)",
+   "family": "bollard",
+   "height": 0.69,
+   "segments": 2,
+   "section": {
+    "kind": "solid_round",
+    "d": 0.09
+   },
+   "material": "cast_iron_grey",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 1000000.0,
+    "footing_yield": 40000,
+    "footing_fail": 0.4
+   },
+   "panels": [],
+   "source": "Commercial cast-iron frade 69 cm x 9 cm (Brazilian catalogue). Set in concrete; footing estimated."
+  },
+  "bollard_steel": {
+   "name": "Steel bollard (concrete filled)",
+   "family": "bollard",
+   "height": 0.8,
+   "segments": 2,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.1143,
+    "t": 0.006,
+    "concrete_filled": true
+   },
+   "material": "steel_s235",
+   "base": {
+    "kind": "footing",
+    "footing_stiffness": 3000000.0,
+    "footing_yield": 60000,
+    "footing_fail": 0.35
+   },
+   "panels": [],
+   "source": "4 in (114.3 mm) x 6 mm concrete-filled steel bollard in a 0.4 m footing, typical of sidewalk protection; not a rated (ASTM F2656) anti-ram bollard. Footing estimated."
+  },
+  "bollard_concrete": {
+   "name": "Precast concrete bollard",
+   "family": "bollard",
+   "height": 0.6,
+   "segments": 2,
+   "section": {
+    "kind": "solid_round",
+    "d": 0.3
+   },
+   "material": "concrete_precast",
+   "base": {
+    "kind": "footing",
+    "footing_stiffness": 2000000.0,
+    "footing_yield": 25000,
+    "footing_fail": 0.3
+   },
+   "panels": [],
+   "source": "Precast concrete bollard 30 x 60 cm (SINAPI 103309), set in the sidewalk; footing estimated."
+  },
+  "bike_rack_u": {
+   "name": "Bike rack (inverted U)",
+   "family": "rack",
+   "height": 0.8,
+   "segments": 3,
+   "legs": 2,
+   "leg_spacing": 0.7,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.0508,
+    "t": 0.002
+   },
+   "material": "steel_s235",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 150000.0,
+    "footing_yield": 4000,
+    "footing_fail": 0.5
+   },
+   "panels": [],
+   "source": "CET-SP paraciclo: inverted U, ~50 mm tube, 0.75-0.90 m high, 0.6-1.0 m wide; 2 mm wall (vendor)."
+  },
+  "lamp_mast_steel": {
+   "name": "Street-lighting mast (steel, flange base)",
+   "family": "mast",
+   "height": 14.0,
+   "segments": 14,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.219,
+    "t": 0.006
+   },
+   "material": "steel_s235",
+   "base": {
+    "kind": "bolted",
+    "bolt_moment": 60000,
+    "footing_stiffness": 8000000.0,
+    "footing_yield": 200000,
+    "footing_fail": 0.3
+   },
+   "panels": [],
+   "source": "ESTIMATE for the Unity MASP block: 14 m twin-arm steel lighting column drawn as a plain 219.1 x 6 mm tube (real columns taper and carry arms and lanterns, not modelled), S235, ~32 kg/m. Plastic moment of the tube ~68 kN m; flange with four M24 anchor bolts taken to let go at 60 kN m. Not measured from the Paulista masts."
+  },
+  "signal_post_steel": {
+   "name": "Traffic-signal post (steel)",
+   "family": "signal",
+   "height": 4.6,
+   "segments": 8,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.1143,
+    "t": 0.0045
+   },
+   "material": "steel_tube_galv",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 900000.0,
+    "footing_yield": 22000,
+    "footing_fail": 0.45
+   },
+   "panels": [
+    {
+     "shape": "rect",
+     "width": 0.32,
+     "height": 1.0,
+     "thickness": 0.004,
+     "density": 2700,
+     "centre": 3.9,
+     "offset": 0.2,
+     "clamp": 5000,
+     "legend": "SIGNAL"
+    }
+   ],
+   "source": "ESTIMATE: 4 in (114.3 x 4.5 mm) galvanised steel signal column, 4.6 m, in a concrete footing; the head is a thin aluminium plate standing in for a three-lens housing (~10 kg class). Footing values estimated."
+  },
+  "signal_mast_arm_steel": {
+   "name": "Traffic-signal mast (cantilever type, arm not modelled)",
+   "family": "signal",
+   "height": 6.0,
+   "segments": 8,
+   "section": {
+    "kind": "round_tube",
+    "d": 0.1413,
+    "t": 0.005
+   },
+   "material": "steel_s235",
+   "base": {
+    "kind": "bolted",
+    "bolt_moment": 24000,
+    "footing_stiffness": 4000000.0,
+    "footing_yield": 90000,
+    "footing_fail": 0.3
+   },
+   "panels": [],
+   "source": "ESTIMATE: 5 in (141.3 x 5 mm) steel column, 6 m, flange base; the cantilever arm and its heads are not modelled. Plastic moment ~23 kN m; bolts taken at 24 kN m."
+  },
+  "tree_young_05": {
+   "name": "Young street tree, 5 cm trunk",
+   "family": "tree",
+   "height": 3.0,
+   "segments": 5,
+   "section": {
+    "kind": "solid_round",
+    "d": 0.05
+   },
+   "material": "wood_green_tipuana",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 2185.0000000000005,
+    "footing_yield": 327.75000000000006,
+    "footing_fail": 0.5
+   },
+   "panels": [],
+   "source": "Root plate from Lundstrom et al. 2007 (Ma = 43.7 kN m x DBH^2 x H, firm soil), doubled below 15 cm as Detter et al. 2023 report small trees anchor better than size rules predict; peak taken at 0.15 rad, release at 0.5 rad (estimates). Crown mass and drag not modelled. See project doc sp-tree-data.md."
+  },
+  "tree_young_10": {
+   "name": "Young street tree, 10 cm trunk",
+   "family": "tree",
+   "height": 5.0,
+   "segments": 6,
+   "section": {
+    "kind": "solid_round",
+    "d": 0.1
+   },
+   "material": "wood_green_tipuana",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 14566.66666666667,
+    "footing_yield": 2185.0000000000005,
+    "footing_fail": 0.5
+   },
+   "panels": [],
+   "source": "Root plate from Lundstrom et al. 2007 (Ma = 43.7 kN m x DBH^2 x H, firm soil), doubled below 15 cm as Detter et al. 2023 report small trees anchor better than size rules predict; peak taken at 0.15 rad, release at 0.5 rad (estimates). Crown mass and drag not modelled. See project doc sp-tree-data.md."
+  },
+  "tree_young_15": {
+   "name": "Street tree, 15 cm trunk",
+   "family": "tree",
+   "height": 7.0,
+   "segments": 7,
+   "section": {
+    "kind": "solid_round",
+    "d": 0.15
+   },
+   "material": "wood_green_tipuana",
+   "base": {
+    "kind": "embedded",
+    "footing_stiffness": 22942.5,
+    "footing_yield": 3441.375,
+    "footing_fail": 0.5
+   },
+   "panels": [],
+   "source": "Root plate from Lundstrom et al. 2007 (Ma = 43.7 kN m x DBH^2 x H, firm soil), doubled below 15 cm as Detter et al. 2023 report small trees anchor better than size rules predict; peak taken at 0.15 rad, release at 0.5 rad (estimates). Crown mass and drag not modelled. See project doc sp-tree-data.md."
+  }
+ }
+}

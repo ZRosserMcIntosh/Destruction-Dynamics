@@ -480,6 +480,13 @@ int World::step(Real dt) {
         wake(b.object);
         b.v += pi.impulse * b.invMass;
         b.w += invInertiaWorld(b, cross(pi.point - b.x, pi.impulse));
+        if (impactSpeedCap > 0) {   // Patch 2026-11 (see world.hpp)
+            const Real sv = length(b.v);
+            if (sv > impactSpeedCap) b.v = b.v * (impactSpeedCap / sv);
+            const Real wCap = impactSpeedCap / std::max(b.half.z, Real(0.15));
+            const Real sw = length(b.w);
+            if (sw > wCap) b.w = b.w * (wCap / sw);
+        }
         o.contactForce = std::max(o.contactForce, length(pi.impulse) / dt);
         if (!o.hitReported) {
             o.hitReported = true;
@@ -744,6 +751,7 @@ Real World::bodyEffectiveMass(const Body& b, const Vec3& p, const Vec3& n) const
 
 // The most the object can resist at p without its structure giving way: the weakest hinge
 // between p and the ground, carrying the force on its arm (the height above it).
+static Real kMinArm = 0.30;
 Real World::staticResistance(const Object& o, const Vec3& p) const {
     const Archetype& a = library.at(o.type);
     const Real vary = 0.9 + 0.2 * static_cast<Real>(o.variation % 1000u) / 999.0;
@@ -760,7 +768,7 @@ Real World::staticResistance(const Object& o, const Vec3& p) const {
         if (j.kind == 1 && a.base.footingYield > 0) cap = std::min(cap, a.base.footingYield * vary);
         if (j.kind == 1 && a.base.kind == BaseKind::SlipBase && a.base.release > 0) cap = std::min(cap, a.base.release * vary * arm);
         if (j.kind == 1 && a.base.kind == BaseKind::Bolted && a.base.boltMoment > 0) cap = std::min(cap, a.base.boltMoment * vary);
-        best = std::min(best, cap / arm);
+        best = std::min(best, cap / std::max(arm, kMinArm));   // Patch 2026-11: a part folded flat near the ground has almost no lever; without a floor the force went to cap / 2 cm
         if (j.kind == 1) held = true;
     }
     return held ? best : 0.0;
@@ -860,11 +868,16 @@ ObstacleHit World::obstaclePoint(const Vec3& p, Real margin, const Vec3& pointVe
     // what it pushed with last step.
     Real structure = b.loose ? 0.0 : staticResistance(o, p);
     if (b.kind == 1 && !b.loose) structure = library.at(o.type).panels[static_cast<std::size_t>(b.panel)].clamp;
+    if (b.kind != 1) {   // Patch 2026-11: a segment lying nearly flat is being driven over, not pushed against: its hinge moments no longer resist the car's forward motion
+        const Real up = std::abs(rotate(b.q, Vec3{0, 0, 1}).z);
+        const Real t = std::clamp((up - 0.15) / 0.45, 0.0, 1.0);
+        structure *= t * t * (3 - 2 * t);
+    }
     const Vec3 r = p - b.x;
     const Vec3 partVel = b.v + cross(b.w, r);
     const Real closing = std::max(0.0, dot(pointVelocity - partVel, best.normal * -1.0));
     const Real inertia = stepTime > 0 ? bodyEffectiveMass(b, p, best.normal) * closing / stepTime : 0.0;
-    best.yieldForce = std::max(std::max(1.2 * o.lastContactForce, structure + inertia), 50.0);
+    best.yieldForce = std::max(structure + inertia, 50.0)   /* Patch 2026-11: no 1.2 x lastContactForce term (it let the force climb 20 % a step for as long as the contact lasted) */;
     return best;
 }
 
@@ -914,11 +927,16 @@ ObstacleHit World::obstacleEdge(const Vec3& a, const Vec3& b, Real margin, const
     const Body& bd = bodies_[static_cast<std::size_t>(bestBody)];
     const Object& o = objects_[static_cast<std::size_t>(bd.object)];
     const Vec3 p = a + (b - a) * bestT;
-    const Real structure = bd.loose ? 0.0 : staticResistance(o, p);
+    Real structure = bd.loose ? 0.0 : staticResistance(o, p);
+    if (bd.kind != 1) {   // Patch 2026-11: as in obstaclePoint, a segment lying nearly flat does not hold the car back
+        const Real up = std::abs(rotate(bd.q, Vec3{0, 0, 1}).z);
+        const Real t = std::clamp((up - 0.15) / 0.45, 0.0, 1.0);
+        structure *= t * t * (3 - 2 * t);
+    }
     const Vec3 partVel = bd.v + cross(bd.w, p - bd.x);
     const Real closing = std::max(0.0, dot(pointVelocity - partVel, best.normal * -1.0));
     const Real inertia = stepTime > 0 ? bodyEffectiveMass(bd, p, best.normal) * closing / stepTime : 0.0;
-    best.yieldForce = std::max(std::max(1.2 * o.lastContactForce, structure + inertia), 50.0);
+    best.yieldForce = std::max(structure + inertia, 50.0)   /* Patch 2026-11: no 1.2 x lastContactForce term (it let the force climb 20 % a step for as long as the contact lasted) */;
     return best;
 }
 
